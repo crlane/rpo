@@ -1,7 +1,8 @@
 [project]
 name = "rpo"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
+keywords = ["git", "repository", "statistics"]
 readme = "README.md"
 requires-python = ">=3.13"
 authors = [
@@ -9,6 +10,9 @@ authors = [
 ]
 maintainers = [
   {name = "Cameron Lane", email = "crlane@adamanteus.com"},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
 ]
 dependencies = [
     "altair[all]>=5.5.0",

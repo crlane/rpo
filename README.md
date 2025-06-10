@@ -1,6 +1,6 @@
 # RPO: Repository Participation Observer
 
-A command line tool and Python library to help you analyze and visualized Git repositories. Ever wondered who has most contributions? How participation has changed over time? What are the hotspots in your code? Who has the highest bus factor? `rpo` can help.
+A command line tool and Python library to help you analyze and visualized Git repositories. Ever wondered who has most contributions? How participation has changed over time? What are the hotspots in your code that change frequently? Who has the highest bus factor? `rpo` can help.
 
 A note on analyzing code repositories: Attempting to quantify developer productivity by lines of code (or git commits) is generally a bad idea. `rpo` is designed to help you uncover how your code's contribution model has changed over time, and how you can build a more efficient and sustainable software operation. The tools here _might_ tell you something about your development team - but it's even more likely that they'll tell you something about your *management*. Do you have high turnover and/or burnout problems? Are people committing way outside their normal work hours? How are you doing at documentation and knowledge transfer?
 
@@ -47,26 +47,54 @@ Commands:
 ### Library
 
 ```bash
-pip install repostats
+pip install rpo
 ```
 
 ```python
-from repostats import Project, Repository
+from rpo import Project, Repository
 
 
 ```
+## Examples
+
+> NOTE: depending on your shell, you may or may not need to escape the splat character in the glob patterns used below.
+
+### Git Blame for all Files in a Repo at a Given Revision, Identify Authors by Email
+```
+$ rpo -r ../my-local-repo -I email repo-blame -R HEAD
+```
+
+
+### Author Activity Report, Including Only Files that Match a Pattern
+```
+$ rpo -r ../my-local-repo -g tests/\* activity-report
+```
+
+### Author Activity Report, Excluding Files that Match a Pattern
+```
+$ rpo -r ../my-local-repo -xg tests/\* activity-report
+```
+
+### File Activity Report, Excluding Files that Match a Pattern
+```
+$ rpo -r ../my-local-repo -xg tests/\* activity-report --files-report
+```
+
+
 ## Features
 - [ ] Automatically generate aliases that refer to the same person
-- [ ] Support analyzing by glob
-- [ ] Produce blame charts,
-- [ ] Ignore merge commits
+- [x] Support analyzing by glob
+- [x] Support excluding by glob
+- [ ] Produce blame charts
+- [x] Optionally ignore merge commits
+- [x] Optionally ignore whitespace
 - [ ] Identify major refactorings
 - [ ] Fast execution, even on giant repositories
 
 
 ## Performance
 
-The goal is for the library to work even on the largest libraries. In general, the performance is proportial to the number of authors, commits, and files being considered in the aggregations.
+The goal is for the library to work even on the largest libraries. In general, the performance is proportional to the number of authors, commits, and files being considered in the aggregations.
 
 The authors regularly [test](./tests/integration/test_cpython_repository.py) using the [cpython repository](https://github.com/python/cpython), which contains over 1,000,000 objects. That takes a while.
 
@@ -74,4 +102,4 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 
 ## Similar Projects and Inspiration
 
-Thanks to [GitPandas](https://github.com/wdm0006/git-pandas).
+Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
