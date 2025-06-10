@@ -9,6 +9,7 @@ All that to say, while I hope this tool will be useful, it is not a substitute f
 ## Usage
 
 ### CLI
+
 ```bash
 Usage: rpo [OPTIONS] COMMAND [ARGS]...
 
@@ -40,7 +41,8 @@ Commands:
   activity-report  Simple commit report aggregated by author or committer
   repo-blame       Computes the per contributor blame for all files at a...
   revisions        List all revisions in the repository
-  summary```
+  summary
+  ```
 
 ### Library
 

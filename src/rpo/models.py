@@ -67,7 +67,6 @@ class FileSelectionOptions(BaseModel):
         else:
             filter_expr = True
 
-        print(filter_expr)
         return filter_expr
 
 
