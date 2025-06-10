@@ -10,8 +10,37 @@ All that to say, while I hope this tool will be useful, it is not a substitute f
 
 ### CLI
 ```bash
-rpo analyze -g
-```
+Usage: rpo [OPTIONS] COMMAND [ARGS]...
+
+Options:
+  -g, --glob TEXT            File path glob patterns to INCLUDE. If specified,
+                             matching paths will be the only files included in
+                             aggregation. If neither --glob nor --xglob are
+                             specified, all files will be included in
+                             aggregation. Paths are relative to root of
+                             repository.
+  -xg, --xglob TEXT          File path glob patterns to EXCLUDE. If specified,
+                             matching paths will be filtered before
+                             aggregation. If neither --glob nor --xglob are
+                             specified, all files will be included in
+                             aggregation. Paths are relative to root of
+                             repository.
+  -A, --aggregate-by TEXT
+  -I, --identify-by TEXT
+  -S, --sort-by TEXT
+  -a, --alias-file FILENAME  A JSON file that maps a contributor name to one
+                             or more aliases. Useful in cases where authors
+                             have used multiple email addresses, names, or
+                             spellings to create commits.
+  -r, --repository PATH
+  -b, --branch TEXT
+  --help                     Show this message and exit.
+
+Commands:
+  activity-report  Simple commit report aggregated by author or committer
+  repo-blame       Computes the per contributor blame for all files at a...
+  revisions        List all revisions in the repository
+  summary```
 
 ### Library
 
