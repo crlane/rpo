@@ -141,7 +141,8 @@ def summary(ctx: click.Context):
 def revisions(ctx: click.Context):
     """List all revisions in the repository"""
     ra = ctx.obj.get("analyzer")
-    ra.output(ra.revs, ctx.obj.get("file_output"))
+    revs = ra.revisions(ctx.obj.get("data_selection"))
+    ra.output(revs, ctx.obj.get("file_output"))
 
 
 @cli.command()

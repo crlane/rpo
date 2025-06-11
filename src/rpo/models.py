@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
+import polars.selectors as cs
 from git import Commit as GitCommit
 from pydantic import BaseModel, Field
 
@@ -45,7 +46,18 @@ class DataSelectionOptions(BaseModel):
 
     @property
     def sort_key(self):
-        return self.group_by_key if self.sort_by == "actor" else self.sort_by
+        if self.sort_by == "actor":
+            return self.group_by_key
+        elif self.sort_by == "numeric":
+            return cs.numeric()
+        elif self.sort_by == "temporal":
+            return cs.temporal()
+        elif self.sort_by == "first":
+            return cs.first()
+        elif self.sort_by == "last":
+            return cs.last()
+        else:
+            return pl.col(self.sort_by)
 
 
 class FileSelectionOptions(BaseModel):

@@ -12,6 +12,7 @@ from .models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     Commit,
+    DataSelectionOptions,
     GitOptions,
     SummaryCmdOptions,
 )
@@ -99,6 +100,9 @@ class RepoAnalyzer:
                 "last_commit": self.revs["authored_datetime"].max(),
             }
         )
+
+    def revisions(self, options: DataSelectionOptions):
+        return self.revs.sort(options.sort_key).limit(options.limit)
 
     def contributor_report(
         self, options: ActivityReportCmdOptions | None = None
