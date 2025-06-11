@@ -2,6 +2,8 @@
 
 A command line tool and Python library to help you analyze and visualized Git repositories. Ever wondered who has most contributions? How participation has changed over time? What are the hotspots in your code that change frequently? Who has the highest bus factor? `rpo` can help.
 
+> NOTE: This is alpha software under active development. There will be breaking changes.
+
 ## Usage
 
 ### CLI
@@ -86,7 +88,7 @@ $ rpo -r ../my-local-repo -xg tests/\* activity-report --files-report
 - [ ] Automatically generate aliases that refer to the same person
 - [x] Support analyzing by glob
 - [x] Support excluding by glob
-- [ ] Produce blame charts
+- [x] Produce blame charts
 - [x] Optionally ignore merge commits
 - [x] Optionally ignore whitespace
 - [ ] Identify major refactorings
@@ -104,3 +106,13 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 ## Similar Projects and Inspiration
 
 Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
+
+## TODOs:
+- [ ] standardize emails, names on ingestion
+- [ ] config_file_for aliases, actors to ignore, other persistent options
+- [ ] Smoother stacked area charts?
+- [ ] combined names
+- [ ] top k authors only for blames
+- [ ] auto ignore node_modules (current git ignore?)
+- [ ] cumulative blame test, make sure that
+- [ ] grouping of commonds and optoins. move options to end
