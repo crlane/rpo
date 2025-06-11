@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import click
+import polars.selectors as cs
 
 from rpo.analyzer import RepoAnalyzer
 from rpo.models import (
@@ -197,4 +198,48 @@ def repo_blame(ctx: click.Context, revision: str, plot: Path | None = None):
         if not plot.name.endswith(".png"):
             plot.mkdir(exist_ok=True, parents=True)
             plot = plot / f"{ra.path.name}_blame_by_{options.group_by_key}.png"
+        chart.save(plot, ppi=200)
+
+
+@cli.command()
+@click.option(
+    "--plot",
+    "-p",
+    "plot",
+    type=click.Path(),
+    help="Directory to write a bar chart image of the blame data",
+)
+@click.pass_context
+def cumulative_blame(ctx: click.Context, plot: Path | None = None):
+    ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    options = BlameCmdOptions(
+        **dict(ctx.obj.get("file_selection")), **dict(ctx.obj.get("data_selection"))
+    )
+    blame_df = ra.cumulative_blame(options)
+    ra.output(
+        blame_df.pivot(
+            [options.group_by_key],
+            index="datetime",
+            values="line_count",
+            aggregate_function="sum",
+        )
+        .sort(cs.temporal())
+        .fill_null(0),
+        ctx.obj.get("file_output"),
+    )
+
+    if plot:
+        # see https://altair-viz.github.io/user_guide/marks/area.html
+        chart = blame_df.plot.area(
+            x="datetime:T",
+            y="sum(line_count):Q",
+            color=f"{options.group_by_key}:N",
+        )
+        if isinstance(plot, str):
+            plot = Path(plot)
+        if not plot.name.endswith(".png"):
+            plot.mkdir(exist_ok=True, parents=True)
+            plot = (
+                plot / f"{ra.path.name}_cumulative_blame_by_{options.group_by_key}.png"
+            )
         chart.save(plot, ppi=200)

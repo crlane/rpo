@@ -1,12 +1,16 @@
 import functools
+import itertools
 from collections.abc import Iterable, Iterator
-from os import PathLike
+from datetime import datetime
+from os import PathLike, process_cpu_count
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+import polars.selectors as cs
 from git.repo import Repo
 from git.repo.base import BlameEntry
+from joblib import Parallel, delayed
 
 from .models import (
     ActivityReportCmdOptions,
@@ -227,7 +231,39 @@ class RepoAnalyzer:
         """
         if not options:
             options = BlameCmdOptions()
-        raise NotImplementedError()
+        total = pl.DataFrame()
+        rev_batches = itertools.batched(
+            self.revs.sort(cs.temporal())
+            .select(pl.col("sha"), pl.col("committed_datetime"))
+            .unique()
+            .iter_rows(),
+            n=25,
+        )
+
+        def _get_blame_for_batches(
+            rev_batch: Iterable[tuple[str, datetime]],
+        ) -> Iterable[pl.DataFrame]:
+            results = pl.DataFrame()
+            for rev_sha, dt in itertools.chain(rev_batch):
+                blame_df = self.blame(options, rev_sha)
+                _ = blame_df.insert_column(
+                    blame_df.width,
+                    pl.Series(
+                        name="datetime", values=itertools.repeat(dt, blame_df.height)
+                    ),
+                )
+                results = results.vstack(blame_df)
+            return results
+
+        machine_cpu_count: int = process_cpu_count() or 2
+        blame_frames_batched = Parallel(
+            n_jobs=max(2, machine_cpu_count), return_as="generator"
+        )(delayed(_get_blame_for_batches)(b) for b in rev_batches)
+
+        for blame_dfs in blame_frames_batched:
+            total = pl.concat([total, blame_dfs])
+
+        return total
 
     def bus_factor(self) -> pl.DataFrame:
         raise NotImplementedError()
