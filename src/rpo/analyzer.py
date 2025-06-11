@@ -194,14 +194,14 @@ class RepoAnalyzer:
                     {
                         "point_in_time": rev,
                         "filename": f,
-                        "sha": blame_entry.commit.hexsha,
+                        "sha": blame_entry.commit.hexsha,  # noqa
                         "line_range": blame_entry.linenos,
-                        "author_name": blame_entry.commit.author.name,
-                        "author_email": blame_entry.commit.author.email,
-                        "committer_name": blame_entry.commit.committer.name,
-                        "committer_email": blame_entry.commit.committer.email,
-                        "committed_datetime": blame_entry.commit.committed_datetime,
-                        "authored_datetime": blame_entry.commit.authored_datetime,
+                        "author_name": blame_entry.commit.author.name,  # noqa
+                        "author_email": blame_entry.commit.author.email,  # noqa
+                        "committer_name": blame_entry.commit.committer.name,  # noqa
+                        "committer_email": blame_entry.commit.committer.email,  # noqa
+                        "committed_datetime": blame_entry.commit.committed_datetime,  # noqa
+                        "authored_datetime": blame_entry.commit.authored_datetime,  # noqa
                     }
                 )
 

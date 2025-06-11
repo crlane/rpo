@@ -13,12 +13,12 @@ maintainers = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License"
 ]
 dependencies = [
     "altair[all]>=5.5.0",
     "click>=8.2.1",
     "gitpython>=3.1.44",
-    "matplotlib>=3.10.3",
     "polars>=1.30.0",
     "pydantic>=2.11.5",
 ]

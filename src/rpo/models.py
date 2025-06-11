@@ -61,7 +61,7 @@ class FileSelectionOptions(BaseModel):
 
     def glob_filter_expr(
         self, filenames: pl.Series | Iterable[str], exclude_generated: bool = False
-    ) -> Iterable[bool]:
+    ) -> list[bool]:
         if self.exclude_globs:
             filter_expr = list(
                 not any(fnmatch(filename, p) for p in self.exclude_globs)
