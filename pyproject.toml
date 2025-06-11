@@ -52,7 +52,6 @@ markers = [
 requires = [
     "hatchling",
     "wheel",
-    "twine",
 ]
 build-backend = "hatchling.build"
 
