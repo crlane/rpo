@@ -4,6 +4,7 @@ dynamic = ["version"]
 description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.13"
 authors = [
   {name = "Cameron Lane", email = "crlane@adamanteus.com"},
