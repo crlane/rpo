@@ -69,6 +69,7 @@ class FileSelectionOptions(BaseModel):
             "*.lock",  # ruby, rust, abunch of things
             "package-lock.json",
             "go.sum",
+            "node_modules/*",
         ]
 
     def glob_filter_expr(
