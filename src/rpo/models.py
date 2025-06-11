@@ -1,8 +1,7 @@
-import fnmatch
-from collections.abc import Iterator
+from collections.abc import Iterable
 from copy import deepcopy
 from datetime import datetime
-from os import PathLike
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +10,12 @@ from git import Commit as GitCommit
 from pydantic import BaseModel, Field
 
 from .types import AggregateBy, IdentifyBy, SortBy
+
+
+class OutputOptions(BaseModel):
+    formats: Iterable[Path | str] = Field(
+        description="Path where the data should be saved.", default=()
+    )
 
 
 class DataSelectionOptions(BaseModel):
@@ -26,6 +31,13 @@ class DataSelectionOptions(BaseModel):
         description="The field to sort on in the resulting DataFrame",
         default="actor",
     )
+    sort_descending: bool = Field(
+        description="If true, sorts from largest to smallest", default=False
+    )
+    limit: int = Field(
+        description="Maximum number of records to return. Applied after sort",
+        default=1_000,
+    )
 
     @property
     def group_by_key(self):
@@ -40,51 +52,57 @@ class FileSelectionOptions(BaseModel):
     include_globs: list[str] | None = None
     exclude_globs: list[str] | None = None
 
-    def _glob_filter(
-        self, filenames: Iterator[str], globs: str | list[str], include: bool = True
-    ):
-        if isinstance(globs, str):
-            globs = [globs]
+    def _generated_file_globs(self) -> Iterable[str]:
+        return [
+            "*.lock",  # ruby, rust, abunch of things
+            "package-lock.json",
+            "go.sum",
+        ]
 
-        def _filter_func_include(filename: str):
-            return any(fnmatch.fnmatch(filename, p) for p in globs)
-
-        def _filter_func_exclude(filename: str):
-            return not any(fnmatch.fnmatch(filename, p) for p in globs)
-
-        _filter_func = _filter_func_include if include else _filter_func_exclude
-        return filter(_filter_func, filenames)
-
-    def filter_expr(self, filenames: Iterator[str]) -> pl.Expr | bool:
+    def glob_filter_expr(
+        self, filenames: pl.Series | Iterable[str], exclude_generated: bool = False
+    ) -> Iterable[bool]:
         if self.exclude_globs:
-            filter_expr = pl.col("filename").is_in(
-                set(self._glob_filter(filenames, self.exclude_globs, include=False))
+            filter_expr = list(
+                not any(fnmatch(filename, p) for p in self.exclude_globs)
+                for filename in filenames
             )
         elif self.include_globs:
-            filter_expr = pl.col("filename").is_in(
-                set(self._glob_filter(filenames, self.include_globs, include=True))
+            filter_expr = list(
+                any(fnmatch(filename, p) for p in self.include_globs)
+                for filename in filenames
+            )
+        elif exclude_generated:
+            filter_expr = list(
+                not any(fnmatch(filename, p) for p in self._generated_file_globs())
+                for filename in filenames
             )
         else:
-            filter_expr = True
+            filter_expr = list(True for _ in filenames)
 
         return filter_expr
 
 
-class SummaryCmdOptions(DataSelectionOptions):
+class SummaryCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for the ProjectAnalyzer.summary command"""
 
 
-class ActivityReportCmdOptions(DataSelectionOptions, FileSelectionOptions):
+class ActivityReportCmdOptions(
+    DataSelectionOptions, FileSelectionOptions, OutputOptions
+):
     """Options for the ProjectAnalyzer.activity_report"""
 
 
-class BlameCmdOptions(DataSelectionOptions, FileSelectionOptions):
+class BlameCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
     """Options for ProjectAnalyzer.blame and ProjectAnalyzer.cumulative_blame"""
 
 
 class GitOptions(BaseModel):
-    repository: str | Path | PathLike[str] | None = None
     branch: str | None = None
+    allow_dirty: bool = False
+    ignore_merges: bool = False
+    ignore_whitespace: bool = False
+    ignore_generated_files: bool = False
 
 
 def recursive_getattr(

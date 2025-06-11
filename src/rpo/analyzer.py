@@ -1,5 +1,5 @@
 import functools
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -12,6 +12,7 @@ from .models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     Commit,
+    GitOptions,
     SummaryCmdOptions,
 )
 
@@ -27,20 +28,14 @@ class RepoAnalyzer:
     for on demand analysis.
     """
 
-    DEFAULT_IGNORE_GLOBS = [
-        "*.lock",  # ruby, rust, abunch of things
-        "package-lock.json",
-        "go.sum",
-    ]
-
     def __init__(
         self,
         repo: Repo | None = None,
         path: str | Path | None = None,
-        branch: str | None = None,
-        ignore_generated_files: bool | list[str] = False,
-        ignore_merges: bool = False,
+        options: GitOptions | None = None,
+        allow_dirty: bool = False,
     ):
+        self.options = options if options else GitOptions()
         if path:
             if isinstance(path, str):
                 path = Path(path)
@@ -52,42 +47,42 @@ class RepoAnalyzer:
         else:
             raise ValueError("Must specify either a `path` or pass a Repo object")
 
-        if self.repo.bare or self.repo.is_dirty():
+        if self.repo.bare:
             raise ValueError(
-                "Repository is either empty has uncommitted changes! Please check the path and/or unstage any changes"
+                "Repository has no commits! Please check the path and/or unstage any changes"
             )
-        self.ignore_generated_files = ignore_generated_files
-        self.ignore_merges = ignore_merges
+        elif self.repo.is_dirty() and not self.options.allow_dirty:
+            raise ValueError(
+                "Repository has uncommitted changes! Please stash any changes or use `--allow-dirty`."
+            )
 
         self._revs = None
-        self._authors = None
-        self._committers = None
-        self._branch = branch
 
     @functools.cache
-    def _file_names_at_rev(self, rev: str) -> set[str]:
+    def _file_names_at_rev(self, rev: str) -> pl.Series:
         raw = self.repo.git.ls_tree("-r", "--name-only", rev)
-        return set(raw.strip().split("\n"))
+        vals = raw.strip().split("\n")
+        return pl.Series(name="filename", values=vals)
 
     @property
     def revs(self):
         """The git revisions property."""
         if self._revs is None:
             revs: list[Commit] = []
-            for c in self.repo.iter_commits(no_merges=self.ignore_merges):
+            for c in self.repo.iter_commits(no_merges=self.options.ignore_merges):
                 revs.extend(Commit.from_git(c, self.path.name, by_file=True))
             self._revs = pl.DataFrame(revs)
         return self._revs
 
     @property
     def default_branch(self):
-        if self._branch is None:
+        if self.options.branch is None:
             branches = {b.name for b in self.repo.branches}
             for n in ["main", "master"]:
                 if n in branches:
-                    self._branch = n
+                    self.options.branch = n
                     break
-        return self._branch
+        return self.options.branch
 
     def summary(self, options: SummaryCmdOptions | None = None) -> pl.DataFrame:
         """A simple summary with counts of files, contributors, commits."""
@@ -108,7 +103,7 @@ class RepoAnalyzer:
     def contributor_report(
         self, options: ActivityReportCmdOptions | None = None
     ) -> pl.DataFrame:
-        if options is None:
+        if not options:
             options = ActivityReportCmdOptions()
 
         if options.aggregate_by.lower() not in [
@@ -124,7 +119,11 @@ class RepoAnalyzer:
             raise ValueError(msg)
 
         return (
-            self.revs.filter(options.filter_expr(iter(self.revs["filename"])))
+            self.revs.filter(
+                options.glob_filter_expr(
+                    self.revs["filename"], self.options.ignore_generated_files
+                )
+            )
             .group_by(options.group_by_key)
             .agg(pl.sum("insertions"), pl.sum("deletions"), pl.sum("lines"))
             .sort(by=options.sort_key)
@@ -133,7 +132,7 @@ class RepoAnalyzer:
     def file_report(
         self, options: ActivityReportCmdOptions | None = None
     ) -> pl.DataFrame:
-        if options is None:
+        if not options:
             options = ActivityReportCmdOptions()
         if options.aggregate_by not in [
             "author",
@@ -148,7 +147,12 @@ class RepoAnalyzer:
             raise ValueError(msg)
 
         return (
-            self.revs.filter(options.filter_expr(iter(self.revs["filename"])))
+            self.revs.filter(
+                options.glob_filter_expr(
+                    self.revs["filename"],
+                    self.options.ignore_generated_files,
+                )
+            )
             .group_by("filename", options.group_by_key)
             .agg(pl.sum("insertions"), pl.sum("deletions"), pl.sum("lines"))
             .sort(by=options.sort_key)
@@ -158,28 +162,18 @@ class RepoAnalyzer:
         self,
         options: BlameCmdOptions | None = None,
         rev: str | None = None,
-        ignore_whitespace: bool = False,
-        ignore_merges: bool = False,
     ) -> pl.DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
         rev = self.repo.head.commit.hexsha if rev is None else rev
         files_at_rev = self._file_names_at_rev(rev)
 
-        if options is None:
+        if not options:
             options = BlameCmdOptions()
 
-        if options.include_globs:
-            files_at_rev = filename_glob_filter(
-                iter(files_at_rev), options.include_globs
-            )
-        elif options.exclude_globs:
-            files_at_rev = filename_glob_filter(
-                iter(files_at_rev), options.exclude_globs, include=False
-            )
         rev_opts: list[str] = []
-        if ignore_whitespace:
+        if self.options.ignore_whitespace:
             rev_opts.append("-w")
-        if ignore_merges:
+        if self.options.ignore_merges:
             rev_opts.append("--no-merges")
         # git blame for each file.
         # so the number of lines items for each file is the number of lines in the
@@ -187,7 +181,11 @@ class RepoAnalyzer:
         # BlameEntry
         blame_map: dict[str, Iterator[BlameEntry]] = {
             f: self.repo.blame_incremental(rev, f, rev_opts=rev_opts)
-            for f in files_at_rev
+            for f in files_at_rev.filter(
+                options.glob_filter_expr(
+                    files_at_rev, self.options.ignore_generated_files
+                )
+            )
         }
         data: list[dict[str, Any]] = []
         for f, blame_entries in blame_map.items():
@@ -215,7 +213,8 @@ class RepoAnalyzer:
         return (
             blame_df.group_by(options.group_by_key)
             .agg(pl.sum(lc_alias))
-            .sort(by=options.sort_key)
+            .sort(by=options.sort_key, descending=options.sort_descending)
+            .limit(options.limit or 1_000)
         )
 
     def cumulative_blame(self, options: BlameCmdOptions | None = None) -> pl.DataFrame:
@@ -231,3 +230,17 @@ class RepoAnalyzer:
 
     def punchcard(self) -> pl.DataFrame:
         raise NotImplementedError()
+
+    def output(self, data: pl.DataFrame, output_paths: Iterable[Path | str]):
+        for fp in output_paths:
+            if fp == "stdout":
+                print(data)
+                continue
+
+            if isinstance(fp, str):
+                fp = Path(fp)
+
+            if fp.name.endswith(".csv"):
+                data.write_csv(fp)
+            elif fp.name.endswith(".json"):
+                data.write_json(fp)
