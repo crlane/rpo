@@ -16,32 +16,37 @@ Usage: rpo [OPTIONS] COMMAND [ARGS]...
 Options:
   -g, --glob TEXT            File path glob patterns to INCLUDE. If specified,
                              matching paths will be the only files included in
-                             aggregation. If neither --glob nor --xglob are
-                             specified, all files will be included in
-                             aggregation. Paths are relative to root of
+                             aggregation.            If neither --glob nor
+                             --xglob are specified, all files will be included
+                             in aggregation. Paths are relative to root of
                              repository.
   -xg, --xglob TEXT          File path glob patterns to EXCLUDE. If specified,
                              matching paths will be filtered before
-                             aggregation. If neither --glob nor --xglob are
-                             specified, all files will be included in
-                             aggregation. Paths are relative to root of
+                             aggregation.            If neither --glob nor
+                             --xglob are specified, all files will be included
+                             in aggregation. Paths are relative to root of
                              repository.
-  -A, --aggregate-by TEXT
-  -I, --identify-by TEXT
-  -S, --sort-by TEXT
-  -a, --alias-file FILENAME  A JSON file that maps a contributor name to one
-                             or more aliases. Useful in cases where authors
-                             have used multiple email addresses, names, or
-                             spellings to create commits.
+  -A, --aggregate-by TEXT    Controls the field used to aggregate data
+  -I, --identify-by TEXT     Controls the field used to identify auhors.
+  -S, --sort-by TEXT         Controls the field used to sort output
+  -a, --alias-file FILENAME  Not currently used. A JSON file that maps a
+                             contributor name to one or more aliases.
+                             Useful in cases where authors have used multiple
+                             email addresses, names, or spellings to create
+                             commits.
+  -o, --output TEXT          Path of the output file; format is determined by
+                             the filename extension.
   -r, --repository PATH
   -b, --branch TEXT
+  --allow-dirty              Proceed with analyis even if repository has
+                             uncommitted changes
   --help                     Show this message and exit.
 
 Commands:
   activity-report  Simple commit report aggregated by author or committer
   repo-blame       Computes the per contributor blame for all files at a...
   revisions        List all revisions in the repository
-  summary
+  summary          Generate very high level summary for the repository
   ```
 
 ### Library
