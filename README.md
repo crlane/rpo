@@ -2,10 +2,6 @@
 
 A command line tool and Python library to help you analyze and visualized Git repositories. Ever wondered who has most contributions? How participation has changed over time? What are the hotspots in your code that change frequently? Who has the highest bus factor? `rpo` can help.
 
-A note on analyzing code repositories: Attempting to quantify developer productivity by lines of code (or git commits) is generally a bad idea. `rpo` is designed to help you uncover how your code's contribution model has changed over time, and how you can build a more efficient and sustainable software operation. The tools here _might_ tell you something about your development team - but it's even more likely that they'll tell you something about your *management*. Do you have high turnover and/or burnout problems? Are people committing way outside their normal work hours? How are you doing at documentation and knowledge transfer?
-
-All that to say, while I hope this tool will be useful, it is not a substitute for thinking.
-
 ## Usage
 
 ### CLI
