@@ -79,7 +79,7 @@ See [test_cli.sh](./test_cli.sh) for more examples.
 
 ### Git Blame for all Files in a Repo at a Given Revision, Identify Users by Email
 ```
-$ rpo -r ../my-local-repo repo-blame -R HEAD -I email
+$ rpo -r ../my-local-repo -R HEAD -I email repo-blame
 ```
 
 ### Cumulative Git Blame for all Files in a Repo at a Given Revision, Identify Users by Name
@@ -99,7 +99,7 @@ $ rpo -r ../my-local-repo -xg tests/\* activity-report
 
 ### File Activity Report, Excluding Files that Match a Pattern
 ```
-$ rpo -r ../my-local-repo -xg tests/\* activity-report --files-report
+$ rpo -r ../my-local-repo -xg tests/\* activity-report -t files
 ```
 
 
