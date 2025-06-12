@@ -107,12 +107,3 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 
 Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
 
-## TODOs:
-- [ ] standardize emails, names on ingestion
-- [ ] config_file_for aliases, actors to ignore, other persistent options
-- [ ] Smoother stacked area charts?
-- [ ] combined names
-- [ ] top k authors only for blames
-- [ ] auto ignore node_modules (current git ignore?)
-- [ ] cumulative blame test, make sure that
-- [ ] grouping of commonds and optoins. move options to end

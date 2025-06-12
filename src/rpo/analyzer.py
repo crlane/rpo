@@ -129,7 +129,7 @@ class RepoAnalyzer:
         return (
             self.revs.filter(
                 options.glob_filter_expr(
-                    self.revs["filename"], self.options.ignore_generated_files
+                    self.revs["filename"],
                 )
             )
             .group_by(options.group_by_key)
@@ -158,7 +158,6 @@ class RepoAnalyzer:
             self.revs.filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
-                    self.options.ignore_generated_files,
                 )
             )
             .group_by("filename", options.group_by_key)
@@ -170,6 +169,7 @@ class RepoAnalyzer:
         self,
         options: BlameCmdOptions | None = None,
         rev: str | None = None,
+        k: int | None = None,
     ) -> pl.DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
         rev = self.repo.head.commit.hexsha if rev is None else rev
@@ -191,7 +191,7 @@ class RepoAnalyzer:
             f: self.repo.blame_incremental(rev, f, rev_opts=rev_opts)
             for f in files_at_rev.filter(
                 options.glob_filter_expr(
-                    files_at_rev, self.options.ignore_generated_files
+                    files_at_rev,
                 )
             )
         }
@@ -205,9 +205,9 @@ class RepoAnalyzer:
                         "sha": blame_entry.commit.hexsha,  # noqa
                         "line_range": blame_entry.linenos,
                         "author_name": blame_entry.commit.author.name,  # noqa
-                        "author_email": blame_entry.commit.author.email,  # noqa
+                        "author_email": blame_entry.commit.author.email.lower(),  # noqa
                         "committer_name": blame_entry.commit.committer.name,  # noqa
-                        "committer_email": blame_entry.commit.committer.email,  # noqa
+                        "committer_email": blame_entry.commit.committer.email.lower(),  # noqa
                         "committed_datetime": blame_entry.commit.committed_datetime,  # noqa
                         "authored_datetime": blame_entry.commit.authored_datetime,  # noqa
                     }
@@ -221,8 +221,8 @@ class RepoAnalyzer:
         return (
             blame_df.group_by(options.group_by_key)
             .agg(pl.sum(lc_alias))
+            .top_k(k or 3, by=lc_alias)
             .sort(by=options.sort_key, descending=options.sort_descending)
-            .limit(options.limit or 1_000)
         )
 
     def cumulative_blame(self, options: BlameCmdOptions | None = None) -> pl.DataFrame:
@@ -272,14 +272,13 @@ class RepoAnalyzer:
         raise NotImplementedError()
 
     def output(self, data: pl.DataFrame, output_paths: Iterable[Path | str]):
-        for fp in output_paths:
-            if fp == "stdout":
-                print(data)
-                continue
+        if not output_paths:
+            print(data)
+            return
 
+        for fp in output_paths:
             if isinstance(fp, str):
                 fp = Path(fp)
-
             if fp.name.endswith(".csv"):
                 data.write_csv(fp)
             elif fp.name.endswith(".json"):

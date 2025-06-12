@@ -25,18 +25,18 @@ class DataSelectionOptions(BaseModel):
         default="author",
     )
     identify_by: IdentifyBy = Field(
-        description="How to identify the actor responsible for commits",
+        description="How to identify the user responsible for commits",
         default="name",
     )
     sort_by: SortBy = Field(
         description="The field to sort on in the resulting DataFrame",
-        default="actor",
+        default="user",
     )
     sort_descending: bool = Field(
         description="If true, sorts from largest to smallest", default=False
     )
     limit: int = Field(
-        description="Maximum number of records to return. Applied after sort",
+        description="Maximum number of files to return. Applied after sort",
         default=1_000,
     )
 
@@ -46,7 +46,7 @@ class DataSelectionOptions(BaseModel):
 
     @property
     def sort_key(self):
-        if self.sort_by == "actor":
+        if self.sort_by == "user":
             return self.group_by_key
         elif self.sort_by == "numeric":
             return cs.numeric()
@@ -63,6 +63,7 @@ class DataSelectionOptions(BaseModel):
 class FileSelectionOptions(BaseModel):
     include_globs: list[str] | None = None
     exclude_globs: list[str] | None = None
+    exclude_generated: bool = False
 
     def _generated_file_globs(self) -> Iterable[str]:
         return [
@@ -72,9 +73,7 @@ class FileSelectionOptions(BaseModel):
             "node_modules/*",
         ]
 
-    def glob_filter_expr(
-        self, filenames: pl.Series | Iterable[str], exclude_generated: bool = False
-    ) -> list[bool]:
+    def glob_filter_expr(self, filenames: pl.Series | Iterable[str]):
         if self.exclude_globs:
             filter_expr = list(
                 not any(fnmatch(filename, p) for p in self.exclude_globs)
@@ -85,7 +84,7 @@ class FileSelectionOptions(BaseModel):
                 any(fnmatch(filename, p) for p in self.include_globs)
                 for filename in filenames
             )
-        elif exclude_generated:
+        elif self.exclude_generated:
             filter_expr = list(
                 not any(fnmatch(filename, p) for p in self._generated_file_globs())
                 for filename in filenames
@@ -116,6 +115,8 @@ class GitOptions(BaseModel):
     ignore_merges: bool = False
     ignore_whitespace: bool = False
     ignore_generated_files: bool = False
+    ignore_bots: bool = False
+    use_gitignore: bool = True
 
 
 def recursive_getattr(
@@ -128,6 +129,8 @@ def recursive_getattr(
         if callable(o) and should_call:
             return o()
         else:
+            if field.endswith("email"):
+                o = str(o).lower()
             return o
     except AttributeError:
         head, _, tail = field.partition(separator)
