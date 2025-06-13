@@ -1,11 +1,12 @@
-.PHONY: integration test quick_test
+.PHONY: integration test test_cli
 
+all: test test_cli
 
 integration:
-	uv run --env-file .env py.test -m integration
+	uv run py.test -m integration
 
 test:
-	uv run py.test -m 'not integration'
+	uv run --env-file .env py.test -m 'not slow and not integration'
 
-quick_test:
-	uv run py.test -m 'not slow'
+test_cli:
+	. ./test_cli.sh
