@@ -9,7 +9,9 @@ from rpo.analyzer import RepoAnalyzer
 from rpo.models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
+    BusFactorCmdOptions,
     GitOptions,
+    PunchcardCmdOptions,
     SummaryCmdOptions,
 )
 
@@ -80,9 +82,10 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
     assert list(file_report.keys()) == [
         "filename",
         "author_name",
+        "lines",
         "insertions",
         "deletions",
-        "lines",
+        "net",
     ]
     assert file_report
 
@@ -93,9 +96,10 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
     ).to_dict(as_series=False)
     assert list(contributor_report.keys()) == [
         "author_name",
+        "lines",
         "insertions",
         "deletions",
-        "lines",
+        "net",
     ]
     # author 1, added one file with one line, deletes file
     assert contributor_report["insertions"][0] == 1
@@ -142,9 +146,9 @@ def test_blame(
             (1, 1),
         ),
     ],
-    ids=["empty", "single-json", "json-and-csv"],
+    ids=["empty-produces-stdout", "single-json", "json-and-csv"],
 )
-def test_output(paths, counts, tmp_repo_analyzer, monkeypatch, tmp_path):
+def test_output(paths, counts, tmp_repo_analyzer, monkeypatch, tmp_path, capsys):
     mocks = {}
     functions = ["write_csv", "write_json"]
     for f in functions:
@@ -156,8 +160,20 @@ def test_output(paths, counts, tmp_repo_analyzer, monkeypatch, tmp_path):
     tmp_repo_analyzer.output(df, paths)
     actual_counts = tuple(mock.call_count for mock in mocks.values())
     assert counts == actual_counts
+    if actual_counts == (0, 0):
+        assert capsys.readouterr().out
 
 
 def test_output_unsupported(tmp_repo_analyzer, tmp_path):
     with pytest.raises(ValueError, match="Unsupported filetype"):
         tmp_repo_analyzer.output(DataFrame(), [tmp_path / "foo.xls"])
+
+
+def test_bus_factor(tmp_repo_analyzer):
+    with pytest.raises(NotImplementedError):
+        tmp_repo_analyzer.bus_factor(BusFactorCmdOptions())
+
+
+def test_punchcard(tmp_repo_analyzer):
+    with pytest.raises(NotImplementedError):
+        tmp_repo_analyzer.punchcard(PunchcardCmdOptions())

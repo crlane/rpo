@@ -3,6 +3,7 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 import click
 import polars.selectors as cs
@@ -15,6 +16,7 @@ from rpo.models import (
     DataSelectionOptions,
     FileSelectionOptions,
     GitOptions,
+    PunchcardCmdOptions,
 )
 from rpo.types import AggregateBy, IdentifyBy, SortBy
 
@@ -207,7 +209,9 @@ def repo_blame(
     blame_df = ra.blame(options, rev=revision)
     ra.output(blame_df, ctx.obj.get("file_output"))
     if plot := ctx.obj.get("plot_location"):
-        chart = blame_df.plot.bar(x="line_count:Q", y=options.group_by_key)
+        chart = blame_df.plot.bar(x="line_count:Q", y=options.group_by_key).properties(
+            title=f"{ra.path.name} Blame",
+        )
         if isinstance(plot, str):
             plot = Path(plot)
         if not plot.name.endswith(".png"):
@@ -245,6 +249,8 @@ def cumulative_blame(ctx: click.Context):
             x="datetime:T",
             y="sum(line_count):Q",
             color=f"{options.group_by_key}:N",
+        ).properties(
+            title=f"{ra.path.name} Cumulative Blame",
         )
         if isinstance(plot, str):
             plot = Path(plot)
@@ -253,4 +259,39 @@ def cumulative_blame(ctx: click.Context):
             plot = (
                 plot / f"{ra.path.name}_cumulative_blame_by_{options.group_by_key}.png"
             )
+        chart.save(plot, ppi=200)
+
+
+@cli.command()
+@click.argument("identifier", type=str)
+@click.pass_context
+def punchcard(ctx: click.Context, identifier: str):
+    """Computes commits for a given user by datetime"""
+    ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    options = PunchcardCmdOptions(
+        **dict(ctx.obj.get("file_selection")),
+        **dict(ctx.obj.get("data_selection")),
+        identifier=identifier,
+    )
+    punchcard_df = ra.punchcard(options)
+    ra.output(punchcard_df, ctx.obj.get("file_output"))
+
+    if plot := ctx.obj.get("plot_location"):
+        # see https://altair-viz.github.io/user_guide/marks/area.html
+        chart = (
+            punchcard_df.rename({identifier: "count", options.punchcard_key: "time"})
+            .plot.square(
+                x="hours(time):O",
+                y="day(time):O",
+                color="sum(count):Q",
+            )
+            .properties(
+                title=f"{identifier} Punchcard".title(),
+            )
+        )
+        if isinstance(plot, str):
+            plot = Path(plot)
+        if not plot.name.endswith(".png"):
+            plot.mkdir(exist_ok=True, parents=True)
+            plot = plot / f"{ra.path.name}_punchcard_{quote(identifier)}.png"
         chart.save(plot, ppi=200)

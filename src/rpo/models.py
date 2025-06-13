@@ -109,6 +109,22 @@ class BlameCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions)
     """Options for ProjectAnalyzer.blame and ProjectAnalyzer.cumulative_blame"""
 
 
+class BusFactorCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
+    """Options for ProjectAnalyzer.bus_factor"""
+
+
+class PunchcardCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
+    """Options for ProjectAnalyzer.punchcard"""
+
+    identifier: str
+
+    @property
+    def punchcard_key(self):
+        if self.aggregate_by == "committer":
+            return "committed_datetime"
+        return "authored_datetime"
+
+
 class GitOptions(BaseModel):
     branch: str | None = None
     allow_dirty: bool = False

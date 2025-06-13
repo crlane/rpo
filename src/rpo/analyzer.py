@@ -11,13 +11,16 @@ import polars.selectors as cs
 from git.repo import Repo
 from git.repo.base import BlameEntry
 from joblib import Parallel, delayed
+from polars import DataFrame
 
 from .models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
+    BusFactorCmdOptions,
     Commit,
     DataSelectionOptions,
     GitOptions,
+    PunchcardCmdOptions,
     SummaryCmdOptions,
 )
 
@@ -76,7 +79,7 @@ class RepoAnalyzer:
             revs: list[Commit] = []
             for c in self.repo.iter_commits(no_merges=self.options.ignore_merges):
                 revs.extend(Commit.from_git(c, self.path.name, by_file=True))
-            self._revs = pl.DataFrame(revs)
+            self._revs = DataFrame(revs)
         return self._revs
 
     @property
@@ -89,12 +92,12 @@ class RepoAnalyzer:
                     break
         return self.options.branch
 
-    def summary(self, options: SummaryCmdOptions | None = None) -> pl.DataFrame:
+    def summary(self, options: SummaryCmdOptions | None = None) -> DataFrame:
         """A simple summary with counts of files, contributors, commits."""
         if not options:
             options = SummaryCmdOptions()
 
-        return pl.DataFrame(
+        return DataFrame(
             {
                 "name": self.revs["repository"].unique(),
                 "files": self.revs["filename"].unique().count(),
@@ -108,16 +111,11 @@ class RepoAnalyzer:
     def revisions(self, options: DataSelectionOptions):
         return self.revs.sort(options.sort_key).limit(options.limit)
 
-    def contributor_report(
-        self, options: ActivityReportCmdOptions | None = None
-    ) -> pl.DataFrame:
-        if not options:
-            options = ActivityReportCmdOptions()
-
+    def _check_agg_and_id_options(self, options: DataSelectionOptions):
         if options.aggregate_by.lower() not in [
             "author",
             "committer",
-        ] or options.identify_by not in [
+        ] or options.identify_by.lower() not in [
             "name",
             "email",
         ]:
@@ -126,6 +124,8 @@ class RepoAnalyzer:
             """
             raise ValueError(msg)
 
+    def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
+        self._check_agg_and_id_options(options)
         return (
             self.revs.filter(
                 options.glob_filter_expr(
@@ -133,50 +133,35 @@ class RepoAnalyzer:
                 )
             )
             .group_by(options.group_by_key)
-            .agg(pl.sum("insertions"), pl.sum("deletions"), pl.sum("lines"))
+            .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
+            .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
             .sort(by=options.sort_key)
         )
 
-    def file_report(
-        self, options: ActivityReportCmdOptions | None = None
-    ) -> pl.DataFrame:
-        if not options:
-            options = ActivityReportCmdOptions()
-        if options.aggregate_by not in [
-            "author",
-            "committer",
-        ] or options.identify_by not in [
-            "name",
-            "email",
-        ]:
-            msg = """Must aggregate by exactly one of `author` or `committer`,\\
-                    and identify by either `name` or `email`. All other values are errors!
-            """
-            raise ValueError(msg)
-
+    def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
+        self._check_agg_and_id_options(options)
         return (
             self.revs.filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
                 )
             )
-            .group_by("filename", options.group_by_key)
-            .agg(pl.sum("insertions"), pl.sum("deletions"), pl.sum("lines"))
-            .sort(by=options.sort_key)
+            .group_by("filename")
+            .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
+            .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
+            .sort(by="filename")
         )
 
     def blame(
         self,
-        options: BlameCmdOptions | None = None,
+        options: BlameCmdOptions,
         rev: str | None = None,
         k: int | None = None,
-    ) -> pl.DataFrame:
+    ) -> DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
+
         rev = self.repo.head.commit.hexsha if rev is None else rev
         files_at_rev = self._file_names_at_rev(rev)
-
-        if not options:
-            options = BlameCmdOptions()
 
         rev_opts: list[str] = []
         if self.options.ignore_whitespace:
@@ -215,7 +200,7 @@ class RepoAnalyzer:
 
         lc_alias = "line_count"
 
-        blame_df = pl.DataFrame(data).with_columns(
+        blame_df = DataFrame(data).with_columns(
             pl.col("line_range").list.len().alias(lc_alias)
         )
         return (
@@ -225,13 +210,11 @@ class RepoAnalyzer:
             .sort(by=options.sort_key, descending=options.sort_descending)
         )
 
-    def cumulative_blame(self, options: BlameCmdOptions | None = None) -> pl.DataFrame:
+    def cumulative_blame(self, options: BlameCmdOptions) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
-        if not options:
-            options = BlameCmdOptions()
-        total = pl.DataFrame()
+        total = DataFrame()
         rev_batches = itertools.batched(
             self.revs.sort(cs.temporal())
             .select(pl.col("sha"), pl.col("committed_datetime"))
@@ -242,8 +225,8 @@ class RepoAnalyzer:
 
         def _get_blame_for_batches(
             rev_batch: Iterable[tuple[str, datetime]],
-        ) -> Iterable[pl.DataFrame]:
-            results = pl.DataFrame()
+        ) -> Iterable[DataFrame]:
+            results = DataFrame()
             for rev_sha, dt in itertools.chain(rev_batch):
                 blame_df = self.blame(options, rev_sha)
                 _ = blame_df.insert_column(
@@ -265,13 +248,28 @@ class RepoAnalyzer:
 
         return total
 
-    def bus_factor(self) -> pl.DataFrame:
+    def bus_factor(self, options: BusFactorCmdOptions) -> DataFrame:
         raise NotImplementedError()
 
-    def punchcard(self) -> pl.DataFrame:
-        raise NotImplementedError()
+    def punchcard(self, options: PunchcardCmdOptions) -> DataFrame:
+        self._check_agg_and_id_options(options)
+        df = (
+            self.revs.filter(options.glob_filter_expr(self.revs["filename"]))
+            .filter(pl.col(options.group_by_key) == options.identifier)
+            .pivot(
+                options.group_by_key,
+                values=["lines"],
+                index=options.punchcard_key,
+                aggregate_function="sum",
+            )
+            .sort(by=cs.temporal())
+        )
+        return df
 
-    def output(self, data: pl.DataFrame, output_paths: Iterable[Path | str]):
+    def file_timeline(self, options: ActivityReportCmdOptions):
+        pass
+
+    def output(self, data: DataFrame, output_paths: Iterable[Path | str]):
         if not output_paths:
             print(data)
             return
@@ -279,7 +277,9 @@ class RepoAnalyzer:
         for fp in output_paths:
             if isinstance(fp, str):
                 fp = Path(fp)
-            if fp.name.endswith(".csv"):
+            if fp.suffix == ".csv":
                 data.write_csv(fp)
-            elif fp.name.endswith(".json"):
+            elif fp.suffix == ".json":
                 data.write_json(fp)
+            else:
+                raise ValueError("Unsupported filetype")
