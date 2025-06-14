@@ -62,6 +62,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/rpo"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/rpo",
+  "tests",
+]
+exclude = [
+  "*.json",
+  "img",
+  ".gitigore"
+]
 
 [tool.hatch.version]
 path = "src/rpo/__init__.py"
