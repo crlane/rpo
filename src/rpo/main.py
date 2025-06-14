@@ -235,7 +235,7 @@ def cumulative_blame(ctx: click.Context):
         blame_df.pivot(
             [options.group_by_key],
             index="datetime",
-            values="line_count",
+            values="lines",
             aggregate_function="sum",
         )
         .sort(cs.temporal())
@@ -255,7 +255,7 @@ def cumulative_blame(ctx: click.Context):
         if isinstance(plot, str):
             plot = Path(plot)
         if not plot.name.endswith(".png"):
-            plot.mkdir(exist_ok=True, parents=True)
+            _ = plot.mkdir(exist_ok=True, parents=True)
             plot = (
                 plot / f"{ra.path.name}_cumulative_blame_by_{options.group_by_key}.png"
             )
@@ -292,6 +292,6 @@ def punchcard(ctx: click.Context, identifier: str):
         if isinstance(plot, str):
             plot = Path(plot)
         if not plot.name.endswith(".png"):
-            plot.mkdir(exist_ok=True, parents=True)
+            _ = plot.mkdir(exist_ok=True, parents=True)
             plot = plot / f"{ra.path.name}_punchcard_{quote(identifier)}.png"
         chart.save(plot, ppi=200)

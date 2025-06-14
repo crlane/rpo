@@ -37,7 +37,8 @@ class DataSelectionOptions(BaseModel):
     )
     limit: int = Field(
         description="Maximum number of files to return. Applied after sort",
-        default=1_000,
+        default=0,
+        ge=0,
     )
 
     @property

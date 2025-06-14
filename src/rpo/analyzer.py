@@ -1,5 +1,6 @@
 import functools
 import itertools
+import logging
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from os import PathLike, process_cpu_count
@@ -23,6 +24,8 @@ from .models import (
     PunchcardCmdOptions,
     SummaryCmdOptions,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectAnalyzer:
@@ -92,11 +95,8 @@ class RepoAnalyzer:
                     break
         return self.options.branch
 
-    def summary(self, options: SummaryCmdOptions | None = None) -> DataFrame:
+    def summary(self, options: SummaryCmdOptions) -> DataFrame:
         """A simple summary with counts of files, contributors, commits."""
-        if not options:
-            options = SummaryCmdOptions()
-
         return DataFrame(
             {
                 "name": self.revs["repository"].unique(),
@@ -109,9 +109,18 @@ class RepoAnalyzer:
         )
 
     def revisions(self, options: DataSelectionOptions):
-        return self.revs.sort(options.sort_key).limit(options.limit)
+        df = self.revs
+        if not options.limit or options.limit < 0:
+            return df.sort(by=options.sort_key)
+        elif options.sort_descending:
+            return df.bottom_k(options.limit, by=options.sort_key)
+        else:
+            return df.top_k(options.limit, by=options.sort_key)
 
-    def _check_agg_and_id_options(self, options: DataSelectionOptions):
+    def _check_agg_and_id_options(
+        self,
+        options: DataSelectionOptions,
+    ):
         if options.aggregate_by.lower() not in [
             "author",
             "committer",
@@ -126,7 +135,7 @@ class RepoAnalyzer:
 
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
-        return (
+        report_df = (
             self.revs.filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
@@ -135,12 +144,15 @@ class RepoAnalyzer:
             .group_by(options.group_by_key)
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
-            .sort(by=options.sort_key)
         )
+
+        if not options.limit or options.limit < 0:
+            return report_df.sort(by=options.sort_key)
+        return report_df.top_k(options.limit, by=options.sort_key)
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
-        return (
+        report_df = (
             self.revs.filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
@@ -149,14 +161,23 @@ class RepoAnalyzer:
             .group_by("filename")
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
-            .sort(by="filename")
         )
+        if (
+            isinstance(options.sort_key, str)
+            and options.sort_key not in report_df.columns
+        ):
+            logger.warning("Invalid sort key for this report, using `filename`...")
+            options.sort_by = "filename"
+        if not options.limit or options.limit < 0:
+            return report_df.sort(by=options.sort_key)
+        elif options.sort_descending:
+            return report_df.bottom_k(options.limit, by=options.sort_key)
+        return report_df.top_k(options.limit, by=options.sort_key)
 
     def blame(
         self,
         options: BlameCmdOptions,
         rev: str | None = None,
-        k: int | None = None,
     ) -> DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
 
@@ -198,19 +219,21 @@ class RepoAnalyzer:
                     }
                 )
 
-        lc_alias = "line_count"
+        lc_alias = "lines"
 
         blame_df = DataFrame(data).with_columns(
             pl.col("line_range").list.len().alias(lc_alias)
         )
-        return (
-            blame_df.group_by(options.group_by_key)
-            .agg(pl.sum(lc_alias))
-            .top_k(k or 3, by=lc_alias)
-            .sort(by=options.sort_key, descending=options.sort_descending)
-        )
+        agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(lc_alias))
 
-    def cumulative_blame(self, options: BlameCmdOptions) -> DataFrame:
+        if not options.limit or options.limit < 0:
+            return agg_df.sort(by=options.sort_key, descending=options.sort_descending)
+        elif options.sort_descending:
+            return agg_df.bottom_k(options.limit, by=options.sort_key)
+        else:
+            return agg_df.top_k(options.limit, by=options.sort_key)
+
+    def cumulative_blame(self, options: BlameCmdOptions, batch_size=25) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
@@ -220,7 +243,7 @@ class RepoAnalyzer:
             .select(pl.col("sha"), pl.col("committed_datetime"))
             .unique()
             .iter_rows(),
-            n=25,
+            n=batch_size,
         )
 
         def _get_blame_for_batches(

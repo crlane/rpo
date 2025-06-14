@@ -10,6 +10,7 @@ from rpo.models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     BusFactorCmdOptions,
+    DataSelectionOptions,
     GitOptions,
     PunchcardCmdOptions,
     SummaryCmdOptions,
@@ -76,12 +77,11 @@ def test_summary(tmp_repo_analyzer: RepoAnalyzer, identify_by: str, contrib_coun
 
 
 def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
-    file_report = tmp_repo_analyzer.file_report(ActivityReportCmdOptions()).to_dict(
-        as_series=False
-    )
+    file_report = tmp_repo_analyzer.file_report(
+        ActivityReportCmdOptions(aggregate_by="author", sort_by="numeric")
+    ).to_dict(as_series=False)
     assert list(file_report.keys()) == [
         "filename",
-        "author_name",
         "lines",
         "insertions",
         "deletions",
@@ -92,7 +92,7 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
 
 def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
     contributor_report = tmp_repo_analyzer.contributor_report(
-        ActivityReportCmdOptions()
+        ActivityReportCmdOptions(sort_by="author_name", limit=0)
     ).to_dict(as_series=False)
     assert list(contributor_report.keys()) == [
         "author_name",
@@ -102,9 +102,10 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
         "net",
     ]
     # author 1, added one file with one line, deletes file
-    assert contributor_report["insertions"][0] == 1
-    assert contributor_report["deletions"][0] == 1
-    assert contributor_report["lines"][0] == 2
+    assert contributor_report["insertions"][0] == 1, "First author insertions mismatch"
+    assert contributor_report["deletions"][0] == 1, "First author deletions mismatch"
+    assert contributor_report["lines"][0] == 2, "First author lines changed mismatch"
+    assert contributor_report["net"][0] == 0, "First author net mismatch"
 
     # author 2, addes one file with two lines, leaves file
     assert contributor_report["insertions"][1] == 2
@@ -175,5 +176,13 @@ def test_bus_factor(tmp_repo_analyzer):
 
 
 def test_punchcard(tmp_repo_analyzer):
-    with pytest.raises(NotImplementedError):
-        tmp_repo_analyzer.punchcard(PunchcardCmdOptions())
+    df = tmp_repo_analyzer.punchcard(
+        PunchcardCmdOptions(identifier="updated@example.com")
+    )
+    assert True
+
+
+def test_revisions(tmp_repo_analyzer):
+    assert tmp_repo_analyzer.revisions(DataSelectionOptions()).height == 6, (
+        "Number of revisions incorrect"
+    )

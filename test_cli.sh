@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+get_last_directory() {
+    local path="$1"
+    basename "$(dirname "$path")"
+}
 REPO=${REPO:-../requests}
 IDENTIFIER=${IDENTIFIER:-me@kennethreitz.com}
-PLOT_DIR=${PLOT_DIR:-"./img/$REPO"}
+PLOT_DIR=${PLOT_DIR:-$(pwd)/img/$(basename "$REPO")}
 BY=${BY:-email}
 
 echo "**** SUMMARY ****"
@@ -27,9 +31,10 @@ uv run rpo -r "$REPO" -I "$BY" --exclude-generated-files --plot "$PLOT_DIR" repo
 printf "\n\n\n"
 
 echo "**** CUMULATIVE BLAME ****"
-uv run rpo -r "$REPO" -I "$BY" --exclude-generated-files --plot ."$PLOT_DIR" cumulative-blame
+uv run rpo -r "$REPO" -I "$BY" --exclude-generated-files --plot "$PLOT_DIR" cumulative-blame
 printf "\n\n\n"
 
 echo "**** PUNCHARD ****"
-uv run rpo -r ../git-pandas -I email --exclude-generated-files --plot ."$PLOT_DIR" punchcard "$IDENTIFIER"
+
+uv run rpo -r ../git-pandas -I email --exclude-generated-files --plot "$PLOT_DIR" punchcard "$IDENTIFIER"
 printf "\n\n\n"
