@@ -36,5 +36,5 @@ printf "\n\n\n"
 
 echo "**** PUNCHARD ****"
 
-uv run rpo -r ../git-pandas -I email --exclude-generated-files --plot "$PLOT_DIR" punchcard "$IDENTIFIER"
+uv run rpo -r "$REPO" -I "$BY" --exclude-generated-files --plot "$PLOT_DIR" punchcard "$IDENTIFIER"
 printf "\n\n\n"
