@@ -126,3 +126,5 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 
 Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
 
+- [git-truck](https://github.com/git-truck)
+- [busfactor](https://github.com/SOM-Research/busfactor)

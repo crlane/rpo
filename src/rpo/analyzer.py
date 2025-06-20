@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from datetime import datetime
 from os import PathLike, process_cpu_count
 from pathlib import Path
@@ -22,6 +22,7 @@ from .models import (
     DataSelectionOptions,
     GitOptions,
     PunchcardCmdOptions,
+    RevisionsCmdOptions,
     SummaryCmdOptions,
 )
 
@@ -44,7 +45,6 @@ class RepoAnalyzer:
         repo: Repo | None = None,
         path: str | Path | None = None,
         options: GitOptions | None = None,
-        allow_dirty: bool = False,
     ):
         self.options = options if options else GitOptions()
         if path:
@@ -97,20 +97,25 @@ class RepoAnalyzer:
 
     def summary(self, options: SummaryCmdOptions) -> DataFrame:
         """A simple summary with counts of files, contributors, commits."""
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        )
         return DataFrame(
             {
-                "name": self.revs["repository"].unique(),
-                "files": self.revs["filename"].unique().count(),
-                "contributors": self.revs[options.group_by_key].unique().count(),
-                "commits": self.revs["sha"].unique().count(),
-                "first_commit": self.revs["authored_datetime"].min(),
-                "last_commit": self.revs["authored_datetime"].max(),
+                "name": df["repository"].unique(),
+                "files": df["filename"].unique().count(),
+                "contributors": df[options.group_by_key].unique().count(),
+                "commits": df["sha"].unique().count(),
+                "first_commit": df["authored_datetime"].min(),
+                "last_commit": df["authored_datetime"].max(),
             }
         )
 
-    def revisions(self, options: DataSelectionOptions):
-        df = self.revs
-        if not options.limit or options.limit < 0:
+    def revisions(self, options: RevisionsCmdOptions):
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        )
+        if not options.limit or options.limit <= 0:
             return df.sort(by=options.sort_key)
         elif options.sort_descending:
             return df.bottom_k(options.limit, by=options.sort_key)
@@ -136,7 +141,10 @@ class RepoAnalyzer:
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         report_df = (
-            self.revs.filter(
+            self.revs.with_columns(
+                pl.col(options.group_by_key).replace(options.aliases)
+            )
+            .filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
                 )
@@ -146,14 +154,17 @@ class RepoAnalyzer:
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
         )
 
-        if not options.limit or options.limit < 0:
+        if not options.limit or options.limit <= 0:
             return report_df.sort(by=options.sort_key)
         return report_df.top_k(options.limit, by=options.sort_key)
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         report_df = (
-            self.revs.filter(
+            self.revs.with_columns(
+                pl.col(options.group_by_key).replace(options.aliases)
+            )
+            .filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
                 )
@@ -168,16 +179,14 @@ class RepoAnalyzer:
         ):
             logger.warning("Invalid sort key for this report, using `filename`...")
             options.sort_by = "filename"
-        if not options.limit or options.limit < 0:
+        if not options.limit or options.limit <= 0:
             return report_df.sort(by=options.sort_key)
         elif options.sort_descending:
             return report_df.bottom_k(options.limit, by=options.sort_key)
         return report_df.top_k(options.limit, by=options.sort_key)
 
     def blame(
-        self,
-        options: BlameCmdOptions,
-        rev: str | None = None,
+        self, options: BlameCmdOptions, rev: str | None = None, data_field="lines"
     ) -> DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
 
@@ -193,7 +202,7 @@ class RepoAnalyzer:
         # so the number of lines items for each file is the number of lines in the
         # file at the specified revision
         # BlameEntry
-        blame_map: dict[str, Iterator[BlameEntry]] = {
+        blame_map: dict[str, Iterable[BlameEntry]] = {
             f: self.repo.blame_incremental(rev, f, rev_opts=rev_opts)
             for f in files_at_rev.filter(
                 options.glob_filter_expr(
@@ -219,27 +228,33 @@ class RepoAnalyzer:
                     }
                 )
 
-        lc_alias = "lines"
-
-        blame_df = DataFrame(data).with_columns(
-            pl.col("line_range").list.len().alias(lc_alias)
+        blame_df = (
+            DataFrame(data)
+            .with_columns(pl.col(options.group_by_key).replace(options.aliases))
+            .with_columns(pl.col("line_range").list.len().alias(data_field))
         )
-        agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(lc_alias))
 
-        if not options.limit or options.limit < 0:
+        agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(data_field))
+
+        if not options.limit or options.limit <= 0:
             return agg_df.sort(by=options.sort_key, descending=options.sort_descending)
         elif options.sort_descending:
             return agg_df.bottom_k(options.limit, by=options.sort_key)
         else:
             return agg_df.top_k(options.limit, by=options.sort_key)
 
-    def cumulative_blame(self, options: BlameCmdOptions, batch_size=25) -> DataFrame:
+    def cumulative_blame(
+        self, options: BlameCmdOptions, batch_size=25, data_field="lines"
+    ) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
         total = DataFrame()
         rev_batches = itertools.batched(
-            self.revs.sort(cs.temporal())
+            self.revs.with_columns(
+                pl.col(options.group_by_key).replace(options.aliases)
+            )
+            .sort(cs.temporal())
             .select(pl.col("sha"), pl.col("committed_datetime"))
             .unique()
             .iter_rows(),
@@ -248,10 +263,10 @@ class RepoAnalyzer:
 
         def _get_blame_for_batches(
             rev_batch: Iterable[tuple[str, datetime]],
-        ) -> Iterable[DataFrame]:
+        ) -> DataFrame:
             results = DataFrame()
             for rev_sha, dt in itertools.chain(rev_batch):
-                blame_df = self.blame(options, rev_sha)
+                blame_df = self.blame(options, rev_sha, data_field=data_field)
                 _ = blame_df.insert_column(
                     blame_df.width,
                     pl.Series(
@@ -272,12 +287,18 @@ class RepoAnalyzer:
         return total
 
     def bus_factor(self, options: BusFactorCmdOptions) -> DataFrame:
-        raise NotImplementedError()
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        )
+        return df
 
     def punchcard(self, options: PunchcardCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         df = (
-            self.revs.filter(options.glob_filter_expr(self.revs["filename"]))
+            self.revs.with_columns(
+                pl.col(options.group_by_key).replace(options.aliases)
+            )
+            .filter(options.glob_filter_expr(self.revs["filename"]))
             .filter(pl.col(options.group_by_key) == options.identifier)
             .pivot(
                 options.group_by_key,

@@ -40,6 +40,17 @@ class DataSelectionOptions(BaseModel):
         default=0,
         ge=0,
     )
+    aliases: dict[str, str] = Field(
+        description="A dictionary matching an alias to the value it should be replaced with before analysis. Useful for correcting misspellings, changed email addresses, etc. in the git history without alterning the repository history.",
+        default={},
+    )
+    exclude_users: list[str] = Field(
+        description="A list of user identifiers (name or email) to exclude from analyis. Useful for ignore commits by bots.",
+        default=[],
+    )
+    include_globs: list[str] | None = None
+    exclude_globs: list[str] | None = None
+    exclude_generated: bool = False
 
     @property
     def group_by_key(self):
@@ -58,13 +69,7 @@ class DataSelectionOptions(BaseModel):
         elif self.sort_by == "last":
             return cs.last()
         else:
-            return pl.col(self.sort_by)
-
-
-class FileSelectionOptions(BaseModel):
-    include_globs: list[str] | None = None
-    exclude_globs: list[str] | None = None
-    exclude_generated: bool = False
+            return pl.col(self.sort_by.lower())
 
     def _generated_file_globs(self) -> Iterable[str]:
         return [
@@ -96,25 +101,27 @@ class FileSelectionOptions(BaseModel):
         return filter_expr
 
 
+class RevisionsCmdOptions(DataSelectionOptions, OutputOptions):
+    """Options for the ProjectAnalyzer.revisions command"""
+
+
 class SummaryCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for the ProjectAnalyzer.summary command"""
 
 
-class ActivityReportCmdOptions(
-    DataSelectionOptions, FileSelectionOptions, OutputOptions
-):
+class ActivityReportCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for the ProjectAnalyzer.activity_report"""
 
 
-class BlameCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
+class BlameCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for ProjectAnalyzer.blame and ProjectAnalyzer.cumulative_blame"""
 
 
-class BusFactorCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
+class BusFactorCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for ProjectAnalyzer.bus_factor"""
 
 
-class PunchcardCmdOptions(DataSelectionOptions, FileSelectionOptions, OutputOptions):
+class PunchcardCmdOptions(DataSelectionOptions, OutputOptions):
     """Options for ProjectAnalyzer.punchcard"""
 
     identifier: str
@@ -132,7 +139,6 @@ class GitOptions(BaseModel):
     ignore_merges: bool = False
     ignore_whitespace: bool = False
     ignore_generated_files: bool = False
-    ignore_bots: bool = False
     use_gitignore: bool = True
 
 
@@ -164,6 +170,7 @@ class Commit(BaseModel):
     committer_name: str
     committer_email: str | None
     summary: str
+    gpgsig: str | None = None
     # file change info
     filename: str | None = None
     insertions: float | None = None
@@ -182,6 +189,7 @@ class Commit(BaseModel):
             "committer.name": "committer_name",
             "committer.email": "committer_email",
             "summary": "summary",
+            "gpgsig": "gpgsig",
         }
         base = {v: recursive_getattr(git_commit, f) for f, v in fields.items()}
         base["repository"] = for_repo
