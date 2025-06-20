@@ -114,7 +114,8 @@ class RepoAnalyzer:
     def revisions(self, options: RevisionsCmdOptions):
         df = self.revs.with_columns(
             pl.col(options.group_by_key).replace(options.aliases)
-        )
+        ).filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
+
         if not options.limit or options.limit <= 0:
             return df.sort(by=options.sort_key)
         elif options.sort_descending:
@@ -144,6 +145,7 @@ class RepoAnalyzer:
             self.revs.with_columns(
                 pl.col(options.group_by_key).replace(options.aliases)
             )
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
             .filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
@@ -164,6 +166,7 @@ class RepoAnalyzer:
             self.revs.with_columns(
                 pl.col(options.group_by_key).replace(options.aliases)
             )
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
             .filter(
                 options.glob_filter_expr(
                     self.revs["filename"],
@@ -231,6 +234,7 @@ class RepoAnalyzer:
         blame_df = (
             DataFrame(data)
             .with_columns(pl.col(options.group_by_key).replace(options.aliases))
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
             .with_columns(pl.col("line_range").list.len().alias(data_field))
         )
 
@@ -254,6 +258,7 @@ class RepoAnalyzer:
             self.revs.with_columns(
                 pl.col(options.group_by_key).replace(options.aliases)
             )
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
             .sort(cs.temporal())
             .select(pl.col("sha"), pl.col("committed_datetime"))
             .unique()
@@ -288,7 +293,9 @@ class RepoAnalyzer:
 
     def bus_factor(self, options: BusFactorCmdOptions) -> DataFrame:
         df = self.revs.with_columns(
-            pl.col(options.group_by_key).replace(options.aliases)
+            pl.col(options.group_by_key)
+            .replace(options.aliases)
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
         )
         return df
 
@@ -298,6 +305,7 @@ class RepoAnalyzer:
             self.revs.with_columns(
                 pl.col(options.group_by_key).replace(options.aliases)
             )
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
             .filter(options.glob_filter_expr(self.revs["filename"]))
             .filter(pl.col(options.group_by_key) == options.identifier)
             .pivot(

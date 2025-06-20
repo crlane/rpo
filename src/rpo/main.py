@@ -132,7 +132,7 @@ def cli(
     exclude_generated: bool = False,
     plot_location: os.PathLike[str] | None = None,
     save_as: Iterable[str | os.PathLike[str]] | None = None,
-    excluded_users: list[str] | None = None,
+    exclude_users: list[str] | None = None,
     aliases: dict[str, str] | None = None,
     limit: int | None = None,
     config_file: os.PathLike[str] | None = None,
@@ -165,7 +165,7 @@ def cli(
         exclude_globs = config.get("exclude_globs", exclude_globs)
         exclude_generated = config.get("exclude_generated", exclude_generated)
 
-        excluded_users = config.get("excluded_users", [])
+        exclude_users = config.get("exclude_users", [])
         aliases = config.get("aliases", {})
         limit = config.get("limit", limit or 0)
 
@@ -185,7 +185,7 @@ def cli(
         identify_by=identify_by,
         sort_by=sort_by,
         aliases=aliases or {},
-        exclude_users=excluded_users or [],
+        exclude_users=exclude_users or [],
         include_globs=include_globs,
         exclude_globs=exclude_globs,
         exclude_generated=exclude_generated,
