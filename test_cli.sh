@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euox pipefail
 
 get_last_directory() {
     local path="$1"
@@ -39,7 +39,7 @@ uv run rpo -r "$REPO" -I "$BY" --exclude-generated -o - -o "$PLOT_DIR/blame.csv"
 printf "\n\n\n"
 
 echo "**** BLAME SAVE BOTH ****"
-uv run rpo -r "$REPO" -I "$BY" --exclude-generated -o - -o "$PLOT_DIR/blame2.json" -o - -o "$PLOT_DIR/blame2.csv" repo-blame
+uv run rpo -r "$REPO" -I "$BY" --exclude-generated -o - -o "$PLOT_DIR/blame2.json" -o "$PLOT_DIR/blame2.csv" repo-blame
 printf "\n\n\n"
 
 echo "**** CUMULATIVE BLAME ****"
