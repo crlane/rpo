@@ -1,27 +1,26 @@
 import json
 import logging
-import os
 from collections.abc import Iterable
+from os import PathLike, getenv
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote
 
 import click
-import polars.selectors as cs
 from click_option_group import optgroup
 
 from rpo.analyzer import RepoAnalyzer
 from rpo.models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
-    DataSelectionOptions,
     GitOptions,
     PunchcardCmdOptions,
+    RevisionsCmdOptions,
+    SummaryCmdOptions,
 )
 from rpo.types import AggregateBy, IdentifyBy, SortBy
 
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", logging.INFO),
+    level=getenv("LOG_LEVEL", logging.INFO),
     format="[%(asctime)s] %(levelname)s: %(name)s.%(funcName)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S.%s",
 )
@@ -97,14 +96,15 @@ logger = logging.getLogger(__name__)
 @optgroup.option(
     "--plot",
     "-p",
-    "plot_location",
+    "img_location",
     type=click.Path(dir_okay=True, file_okay=True),
     help="The directory where plot output visualization will live. Either a filename ending with '.png' or a directory.",
 )
 @optgroup("Output options", help="Control how data is displayed or saved")
 @optgroup.option(
-    "--save-as",
-    type=click.Path(dir_okay=False, file_okay=True, writable=True),
+    "--output-to",
+    "-o",
+    type=click.Path(dir_okay=False),
     multiple=True,
     help="Save the report data to the path provided; format is determined by the filename extension,\
             which must be one of (.json|.csv). If no save-as path is provided, the report will be printed to stdout",
@@ -130,12 +130,12 @@ def cli(
     exclude_globs: list[str] | None = None,
     include_globs: list[str] | None = None,
     exclude_generated: bool = False,
-    plot_location: os.PathLike[str] | None = None,
-    save_as: Iterable[str | os.PathLike[str]] | None = None,
+    img_location: PathLike[str] | None = None,
+    output_to: Iterable[PathLike[str]] | None = None,
     exclude_users: list[str] | None = None,
     aliases: dict[str, str] | None = None,
     limit: int | None = None,
-    config_file: os.PathLike[str] | None = None,
+    config_file: PathLike[str] | None = None,
 ):
     _ = ctx.ensure_object(dict)
 
@@ -180,7 +180,7 @@ def cli(
             ignore_merges=ignore_merges,
         ),
     )
-    ctx.obj["data_selection"] = DataSelectionOptions(
+    ctx.obj["data_selection"] = dict(
         aggregate_by=aggregate_by,
         identify_by=identify_by,
         sort_by=sort_by,
@@ -190,9 +190,7 @@ def cli(
         exclude_globs=exclude_globs,
         exclude_generated=exclude_generated,
     )
-
-    ctx.obj["plot_location"] = plot_location
-    ctx.obj["file_output"] = save_as
+    ctx.obj["output"] = dict(img_location=img_location, output_file_paths=output_to)
 
 
 @cli.command()
@@ -200,8 +198,12 @@ def cli(
 def summary(ctx: click.Context):
     """Generate very high level summary for the repository"""
     ra = ctx.obj.get("analyzer")
-    summary_df = ra.summary(ctx.obj.get("data_selection"))
-    ra.output(summary_df, ctx.obj.get("file_output"))
+    _ = ra.summary(
+        SummaryCmdOptions(
+            **ctx.obj.get("data_selection"),
+            **ctx.obj.get("output", {}),
+        )
+    )
 
 
 @cli.command()
@@ -209,8 +211,9 @@ def summary(ctx: click.Context):
 def revisions(ctx: click.Context):
     """List all revisions in the repository"""
     ra = ctx.obj.get("analyzer")
-    revs = ra.revisions(ctx.obj.get("data_selection"))
-    ra.output(revs, ctx.obj.get("file_output"))
+    _ = ra.revisions(
+        RevisionsCmdOptions(**ctx.obj.get("data_selection"), **ctx.obj.get("output"))
+    )
 
 
 @cli.command
@@ -228,12 +231,13 @@ def activity_report(
     """Produces file or author report of activity at a particular git revision"""
     ra = ctx.obj.get("analyzer")
 
-    options = ActivityReportCmdOptions(**dict(ctx.obj.get("data_selection")))
+    options = ActivityReportCmdOptions(
+        **ctx.obj.get("data_selection", {}), **ctx.obj.get("output", {})
+    )
     if report_type.lower().startswith("file"):
-        report_df = ra.file_report(options)
+        _ = ra.file_report(options)
     else:
-        report_df = ra.contributor_report(options)
-    ra.output(report_df, ctx.obj.get("file_output"))
+        _ = ra.contributor_report(options)
 
 
 @cli.command
@@ -245,21 +249,11 @@ def repo_blame(
 ):
     """Computes the per user blame for all files at a given revision"""
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
-    options = BlameCmdOptions(**dict(ctx.obj.get("data_selection")))
+    options = BlameCmdOptions(
+        **ctx.obj.get("data_selection"), **ctx.obj.get("output", {})
+    )
     data_key = "lines"
-    blame_df = ra.blame(options, rev=revision, data_field=data_key)
-    ra.output(blame_df, ctx.obj.get("file_output"))
-    if plot := ctx.obj.get("plot_location"):
-        chart = blame_df.plot.bar(x=f"{data_key}:Q", y=options.group_by_key).properties(
-            title=f"{ra.path.name} Blame at {revision[:10] if revision else 'HEAD'}",
-        )
-        if isinstance(plot, str):
-            plot = Path(plot)
-        if not plot.name.endswith(".png"):
-            _ = plot.mkdir(exist_ok=True, parents=True)
-            plot = plot / f"{ra.path.name}_blame_by_{options.group_by_key}.png"
-        chart.save(plot, ppi=200)
-        logger.info(f"File written to {plot}")
+    _ = ra.blame(options, rev=revision, data_field=data_key)
 
 
 @cli.command()
@@ -269,38 +263,10 @@ def cumulative_blame(ctx: click.Context):
     calculate the blame information.
     """
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
-    options = BlameCmdOptions(**dict(ctx.obj.get("data_selection")))
-    data_key = "lines"
-    blame_df = ra.cumulative_blame(options)
-    ra.output(
-        blame_df.pivot(
-            [options.group_by_key],
-            index="datetime",
-            values=data_key,
-            aggregate_function="sum",
-        )
-        .sort(cs.temporal())
-        .fill_null(0),
-        ctx.obj.get("file_output"),
+    options = BlameCmdOptions(
+        **ctx.obj.get("data_selection"), **ctx.obj.get("output", {})
     )
-
-    if plot := ctx.obj.get("plot_location"):
-        # see https://altair-viz.github.io/user_guide/marks/area.html
-        chart = blame_df.plot.area(
-            x="datetime:T",
-            y=f"sum({data_key}):Q",
-            color=f"{options.group_by_key}:N",
-        ).properties(
-            title=f"{ra.path.name} Cumulative Blame",
-        )
-        if isinstance(plot, str):
-            plot = Path(plot)
-        if not plot.name.endswith(".png"):
-            _ = plot.mkdir(exist_ok=True, parents=True)
-            plot = (
-                plot / f"{ra.path.name}_cumulative_blame_by_{options.group_by_key}.png"
-            )
-        chart.save(plot, ppi=200)
+    _ = ra.cumulative_blame(options)
 
 
 @cli.command()
@@ -310,29 +276,9 @@ def punchcard(ctx: click.Context, identifier: str):
     """Computes commits for a given user by datetime"""
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
     options = PunchcardCmdOptions(
-        **dict(ctx.obj.get("data_selection")),
+        **ctx.obj.get("data_selection"),
+        **ctx.obj.get("output", {}),
         identifier=identifier,
     )
-    punchcard_df = ra.punchcard(options)
-    ra.output(punchcard_df, ctx.obj.get("file_output"))
 
-    if plot := ctx.obj.get("plot_location"):
-        # see https://altair-viz.github.io/user_guide/marks/area.html
-        chart = (
-            punchcard_df.rename({identifier: "count", options.punchcard_key: "time"})
-            .plot.circle(
-                x="hours(time):O",
-                y="day(time):O",
-                color="sum(count):Q",
-                size="sum(count):Q",
-            )
-            .properties(
-                title=f"{identifier} Punchcard".title(),
-            )
-        )
-        if isinstance(plot, str):
-            plot = Path(plot)
-        if not plot.name.endswith(".png"):
-            _ = plot.mkdir(exist_ok=True, parents=True)
-            plot = plot / f"{ra.path.name}_punchcard_{quote(identifier)}.png"
-        chart.save(plot, ppi=200)
+    _ = ra.punchcard(options)

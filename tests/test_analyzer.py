@@ -1,24 +1,22 @@
-from unittest.mock import Mock
-
 import pytest
 from git import Actor
 from git.repo import Repo
-from polars import DataFrame
 
 from rpo.analyzer import RepoAnalyzer
 from rpo.models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     BusFactorCmdOptions,
-    DataSelectionOptions,
     GitOptions,
     PunchcardCmdOptions,
+    RevisionsCmdOptions,
     SummaryCmdOptions,
 )
+from rpo.types import IdentifyBy
 
 
 def test_fail_no_path_no_repo():
-    with pytest.raises(ValueError, match="Must specify either") as e:
+    with pytest.raises(ValueError, match="Must specify either"):
         _ = RepoAnalyzer()
 
 
@@ -66,7 +64,9 @@ def test_default_branch(
     [("name", 3), ("email", 4)],
     ids=("by-name", "by-email"),
 )
-def test_summary(tmp_repo_analyzer: RepoAnalyzer, identify_by: str, contrib_count: int):
+def test_summary(
+    tmp_repo_analyzer: RepoAnalyzer, identify_by: IdentifyBy, contrib_count: int
+):
     options = SummaryCmdOptions(identify_by=identify_by)
     summary = tmp_repo_analyzer.summary(options)
     assert summary is not None
@@ -126,48 +126,12 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
 def test_blame(
     tmp_repo_analyzer: RepoAnalyzer,
     actors: list[Actor],
-    identify_by: str,
+    identify_by: IdentifyBy,
     lines_count: int,
 ):
     options = BlameCmdOptions(identify_by=identify_by)
     blame_report = tmp_repo_analyzer.blame(options).to_dict(as_series=False)
-    assert blame_report
-
-
-@pytest.mark.parametrize(
-    "paths, counts",
-    [
-        ((), (0, 0)),
-        (("foo.json",), (0, 1)),
-        (
-            (
-                "foo.csv",
-                "foo.json",
-            ),
-            (1, 1),
-        ),
-    ],
-    ids=["empty-produces-stdout", "single-json", "json-and-csv"],
-)
-def test_output(paths, counts, tmp_repo_analyzer, monkeypatch, tmp_path, capsys):
-    mocks = {}
-    functions = ["write_csv", "write_json"]
-    for f in functions:
-        mocks[f] = Mock(name=f)
-        monkeypatch.setattr(DataFrame, f, mocks[f])
-    paths = [tmp_path / p for p in paths]
-
-    df = DataFrame(range(10))
-    tmp_repo_analyzer.output(df, paths)
-    actual_counts = tuple(mock.call_count for mock in mocks.values())
-    assert counts == actual_counts
-    if actual_counts == (0, 0):
-        assert capsys.readouterr().out
-
-
-def test_output_unsupported(tmp_repo_analyzer, tmp_path):
-    with pytest.raises(ValueError, match="Unsupported filetype"):
-        tmp_repo_analyzer.output(DataFrame(), [tmp_path / "foo.xls"])
+    assert blame_report  # TODO: make assertion about line counts
 
 
 def test_bus_factor(tmp_repo_analyzer):
@@ -175,14 +139,32 @@ def test_bus_factor(tmp_repo_analyzer):
     assert True
 
 
-def test_punchcard(tmp_repo_analyzer):
+@pytest.mark.parametrize(
+    "identifier,by,height,count",
+    [
+        (
+            "updated@example.com",
+            "email",
+            1,
+            4,
+        ),
+        ("User2 Lastname", "name", 1, 7),
+    ],
+)
+def test_punchcard(
+    tmp_repo_analyzer, identifier: str, by: IdentifyBy, height: int, count: int
+):
     df = tmp_repo_analyzer.punchcard(
-        PunchcardCmdOptions(identifier="updated@example.com")
+        PunchcardCmdOptions(
+            identifier=identifier, identify_by=by, aggregate_by="author"
+        )
     )
-    assert True
+    assert df.height == height
+    df_dict = df.to_dict(as_series=False)
+    assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
 
 
 def test_revisions(tmp_repo_analyzer):
-    assert tmp_repo_analyzer.revisions(DataSelectionOptions()).height == 6, (
+    assert tmp_repo_analyzer.revisions(RevisionsCmdOptions()).height == 6, (
         "Number of revisions incorrect"
     )

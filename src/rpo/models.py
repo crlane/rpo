@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from copy import deepcopy
 from datetime import datetime
 from fnmatch import fnmatch
-from pathlib import Path
+from os import PathLike
 from typing import Any, Literal
 
 import polars as pl
@@ -13,10 +13,20 @@ from pydantic import BaseModel, Field
 from .types import AggregateBy, IdentifyBy, SortBy
 
 
-class OutputOptions(BaseModel):
-    formats: Iterable[Path | str] = Field(
-        description="Path where the data should be saved.", default=()
+class FileSaveOptions(BaseModel):
+    output_file_paths: list[PathLike[str]] | None = Field(
+        description="Path where the data should be saved.", default=None
     )
+
+
+class PlotOptions(BaseModel):
+    img_location: PathLike[str] | None = Field(
+        description="Where to save the file", default=None
+    )
+
+
+class OutputOptions(PlotOptions, FileSaveOptions):
+    pass
 
 
 class DataSelectionOptions(BaseModel):
@@ -101,11 +111,11 @@ class DataSelectionOptions(BaseModel):
         return filter_expr
 
 
-class RevisionsCmdOptions(DataSelectionOptions, OutputOptions):
+class RevisionsCmdOptions(DataSelectionOptions, FileSaveOptions):
     """Options for the ProjectAnalyzer.revisions command"""
 
 
-class SummaryCmdOptions(DataSelectionOptions, OutputOptions):
+class SummaryCmdOptions(DataSelectionOptions, FileSaveOptions):
     """Options for the ProjectAnalyzer.summary command"""
 
 

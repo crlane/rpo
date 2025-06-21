@@ -6,6 +6,7 @@ from datetime import datetime
 from os import PathLike, process_cpu_count
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import polars as pl
 import polars.selectors as cs
@@ -13,6 +14,9 @@ from git.repo import Repo
 from git.repo.base import BlameEntry
 from joblib import Parallel, delayed
 from polars import DataFrame
+
+from rpo.plotting import Plotter
+from rpo.types import SupportedPlotType
 
 from .models import (
     ActivityReportCmdOptions,
@@ -25,13 +29,14 @@ from .models import (
     RevisionsCmdOptions,
     SummaryCmdOptions,
 )
+from .writer import Writer
 
 logger = logging.getLogger(__name__)
 
 
 class ProjectAnalyzer:
     def __init__(self, project: PathLike[str]):
-        pass
+        self.path = Path(project)
 
 
 class RepoAnalyzer:
@@ -50,8 +55,11 @@ class RepoAnalyzer:
         if path:
             if isinstance(path, str):
                 path = Path(path)
-            self.path = path
-            self.repo = Repo(path)
+            if (path / ".git").exists():
+                self.path = path
+                self.repo = Repo(path)
+            else:
+                raise ValueError("Specified path does not contain '.git' directory")
         elif repo:
             self.repo = repo
             self.path = Path(repo.common_dir).parent
@@ -95,33 +103,28 @@ class RepoAnalyzer:
                     break
         return self.options.branch
 
-    def summary(self, options: SummaryCmdOptions) -> DataFrame:
-        """A simple summary with counts of files, contributors, commits."""
-        df = self.revs.with_columns(
-            pl.col(options.group_by_key).replace(options.aliases)
-        )
-        return DataFrame(
-            {
-                "name": df["repository"].unique(),
-                "files": df["filename"].unique().count(),
-                "contributors": df[options.group_by_key].unique().count(),
-                "commits": df["sha"].unique().count(),
-                "first_commit": df["authored_datetime"].min(),
-                "last_commit": df["authored_datetime"].max(),
-            }
-        )
+    def _output(
+        self,
+        options: SummaryCmdOptions
+        | BlameCmdOptions
+        | PunchcardCmdOptions
+        | RevisionsCmdOptions
+        | ActivityReportCmdOptions,
+        output_df: DataFrame,
+        plot_df: DataFrame | None = None,
+        plot_type: SupportedPlotType | None = None,
+        **kwargs,
+    ):
+        if locs := options.output_file_paths:
+            writer = Writer(locs)
+            writer.write(output_df)
 
-    def revisions(self, options: RevisionsCmdOptions):
-        df = self.revs.with_columns(
-            pl.col(options.group_by_key).replace(options.aliases)
-        ).filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-
-        if not options.limit or options.limit <= 0:
-            return df.sort(by=options.sort_key)
-        elif options.sort_descending:
-            return df.bottom_k(options.limit, by=options.sort_key)
-        else:
-            return df.top_k(options.limit, by=options.sort_key)
+        if hasattr(options, "img_location"):
+            if img_loc := options.img_location:
+                assert plot_type is not None
+                plot_df = plot_df if plot_df is not None else output_df
+                plotter = Plotter(img_loc, df=plot_df, plot_type=plot_type, **kwargs)
+                plotter.plot()
 
     def _check_agg_and_id_options(
         self,
@@ -138,6 +141,38 @@ class RepoAnalyzer:
                     and identify by either `name` or `email`. All other values are errors!
             """
             raise ValueError(msg)
+
+    def summary(self, options: SummaryCmdOptions) -> DataFrame:
+        """A simple summary with counts of files, contributors, commits."""
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        )
+        summary_df = DataFrame(
+            {
+                "name": df["repository"].unique(),
+                "files": df["filename"].unique().count(),
+                "contributors": df[options.group_by_key].unique().count(),
+                "commits": df["sha"].unique().count(),
+                "first_commit": df["authored_datetime"].min(),
+                "last_commit": df["authored_datetime"].max(),
+            }
+        )
+        self._output(options, summary_df)
+        return summary_df
+
+    def revisions(self, options: RevisionsCmdOptions):
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        ).filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
+
+        if not options.limit or options.limit <= 0:
+            revision_df = df.sort(by=options.sort_key)
+        elif options.sort_descending:
+            revision_df = df.bottom_k(options.limit, by=options.sort_key)
+        else:
+            revision_df = df.top_k(options.limit, by=options.sort_key)
+        self._output(options, revision_df)
+        return revision_df
 
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
@@ -157,8 +192,13 @@ class RepoAnalyzer:
         )
 
         if not options.limit or options.limit <= 0:
-            return report_df.sort(by=options.sort_key)
-        return report_df.top_k(options.limit, by=options.sort_key)
+            report_df = report_df.sort(by=options.sort_key)
+        elif options.sort_descending:
+            report_df = report_df.bottom_k(options.limit, by=options.sort_key)
+        else:
+            report_df = report_df.top_k(options.limit, by=options.sort_key)
+        self._output(options, report_df)
+        return report_df
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
@@ -183,13 +223,20 @@ class RepoAnalyzer:
             logger.warning("Invalid sort key for this report, using `filename`...")
             options.sort_by = "filename"
         if not options.limit or options.limit <= 0:
-            return report_df.sort(by=options.sort_key)
+            report_df = report_df.sort(by=options.sort_key)
         elif options.sort_descending:
-            return report_df.bottom_k(options.limit, by=options.sort_key)
-        return report_df.top_k(options.limit, by=options.sort_key)
+            report_df = report_df.bottom_k(options.limit, by=options.sort_key)
+        else:
+            report_df = report_df.top_k(options.limit, by=options.sort_key)
+        self._output(options, report_df)
+        return report_df
 
     def blame(
-        self, options: BlameCmdOptions, rev: str | None = None, data_field="lines"
+        self,
+        options: BlameCmdOptions,
+        rev: str | None = None,
+        data_field="lines",
+        headless=False,
     ) -> DataFrame:
         """For a given revision, lists the number of total lines contributed by the aggregating entity"""
 
@@ -241,11 +288,25 @@ class RepoAnalyzer:
         agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(data_field))
 
         if not options.limit or options.limit <= 0:
-            return agg_df.sort(by=options.sort_key, descending=options.sort_descending)
+            agg_df = agg_df.sort(
+                by=options.sort_key, descending=options.sort_descending
+            )
         elif options.sort_descending:
-            return agg_df.bottom_k(options.limit, by=options.sort_key)
+            agg_df = agg_df.bottom_k(options.limit, by=options.sort_key)
         else:
-            return agg_df.top_k(options.limit, by=options.sort_key)
+            agg_df = agg_df.top_k(options.limit, by=options.sort_key)
+        if not headless:
+            self._output(
+                options,
+                agg_df,
+                plot_type="blame",
+                title=f"{self.path.name} Blame at {rev[:10] if rev else 'HEAD'}",
+                x=f"{data_field}:Q",
+                y=options.group_by_key,
+                filename=f"{self.path.name}_blame_by_{options.group_by_key}.png",
+            )
+
+        return agg_df
 
     def cumulative_blame(
         self, options: BlameCmdOptions, batch_size=25, data_field="lines"
@@ -271,7 +332,9 @@ class RepoAnalyzer:
         ) -> DataFrame:
             results = DataFrame()
             for rev_sha, dt in itertools.chain(rev_batch):
-                blame_df = self.blame(options, rev_sha, data_field=data_field)
+                blame_df = self.blame(
+                    options, rev_sha, data_field=data_field, headless=True
+                )
                 _ = blame_df.insert_column(
                     blame_df.width,
                     pl.Series(
@@ -289,6 +352,27 @@ class RepoAnalyzer:
         for blame_dfs in blame_frames_batched:
             total = pl.concat([total, blame_dfs])
 
+        pivot_df = (
+            total.pivot(
+                [options.group_by_key],
+                index="datetime",
+                values=data_field,
+                aggregate_function="sum",
+            )
+            .sort(cs.temporal())
+            .fill_null(0)
+        )
+        self._output(
+            options,
+            pivot_df,
+            plot_df=total,
+            plot_type="cumulative_blame",
+            x="datetime:T",
+            y=f"sum({data_field}):Q",
+            color=f"{options.group_by_key}:N",
+            title=f"{self.path.name} Cumulative Blame",
+            filename=f"{self.path.name}_cumulative_blame_by_{options.group_by_key}.png",
+        )
         return total
 
     def bus_factor(self, options: BusFactorCmdOptions) -> DataFrame:
@@ -316,22 +400,22 @@ class RepoAnalyzer:
             )
             .sort(by=cs.temporal())
         )
+        plot_df = df.rename(
+            {options.identifier: "count", options.punchcard_key: "time"}
+        )
+        self._output(
+            options,
+            df,
+            plot_df=plot_df,
+            plot_type="punchcard",
+            x="hours(time):O",
+            y="day(time):O",
+            color="sum(count):Q",
+            size="sum(count):Q",
+            title="{options.identifier} Punchcard".title(),
+            filename=f"{self.path.name}_punchcard_{quote(options.identifier)}.png",
+        )
         return df
 
     def file_timeline(self, options: ActivityReportCmdOptions):
         pass
-
-    def output(self, data: DataFrame, output_paths: Iterable[Path | str]):
-        if not output_paths:
-            print(data)
-            return
-
-        for fp in output_paths:
-            if isinstance(fp, str):
-                fp = Path(fp)
-            if fp.suffix == ".csv":
-                data.write_csv(fp)
-            elif fp.suffix == ".json":
-                data.write_json(fp)
-            else:
-                raise ValueError("Unsupported filetype")
