@@ -1,8 +1,10 @@
 import logging
 from pathlib import Path
-from tempfile import mkdtemp
+from tempfile import gettempdir
+from typing import Any
 
 import duckdb
+from polars import DataFrame
 
 from rpo.models import FileChangeCommitRecord
 
@@ -12,14 +14,13 @@ logger = logging.getLogger(__name__)
 class DB:
     def __init__(self, name: str, in_memory=False) -> None:
         self.name = name
-        self._file_path = None
+        self._file_path = ":memory:"
         if not in_memory:
-            self._file_path = Path(mkdtemp(prefix="rpo-")) / f"{self.name}.ddb"
+            tmp_dir = Path(gettempdir()) / "rpo-data"
+            tmp_dir.mkdir(exist_ok=True, parents=True)
+            self._file_path = tmp_dir / f"{self.name}.ddb"
 
-        if self._file_path:
-            self.con = duckdb.connect(self._file_path)
-        else:
-            self.con = duckdb.connect()
+        self.con = duckdb.connect(self._file_path)
 
     def create_tables(self):
         _ = self.con.sql("""
@@ -79,3 +80,36 @@ class DB:
         logger.info(
             f"Inserted {len(revs)} file change records into {self._file_path if self._file_path else 'memory'}"
         )
+
+    def _execute_to_pl_df(
+        self, query, params: list[Any] | dict[str, Any] | None = None
+    ) -> DataFrame:
+        if params:
+            return self.con.execute(query, params).pl()
+        return self.con.execute(query).pl()
+
+    def change_count(self) -> int:
+        return self.con.execute(
+            "select count(distinct sha) as commit_count from file_changes"
+        ).pl()["commit_count"][0]
+
+    def changes_per_file(self) -> DataFrame:
+        return self._execute_to_pl_df("""SELECT filename, count(DISTINCT sha) AS count
+              FROM file_changes
+              GROUP BY filename
+              ORDER BY count DESC""")
+
+    def repo_summary(self) -> DataFrame:
+        return self._execute_to_pl_df()
+
+    def changes_by_user(self, group_by: str) -> DataFrame:
+        # NOTE: you cannot use duckdb parameters to set group by clause, so do this to prevent injection
+        if group_by not in {
+            "author_email",
+            "author_name",
+            "commiter_name",
+            "committer_email",
+        }:
+            raise ValueError(f"Invalid group_by key: {group_by}")
+        query = f"""SELECT {group_by}, count(DISTINCT sha) as count from file_changes GROUP BY {group_by} ORDER BY count"""
+        return self._execute_to_pl_df(query)

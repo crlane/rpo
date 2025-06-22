@@ -39,12 +39,10 @@ logger = logging.getLogger(__name__)
 LARGE_THRESHOLD = 10_000
 
 
-db: DB | None = None
-
-
-def init_db(name: str):
-    db = DB(name=name, in_memory=False)
-    db.create_tables()
+def init_db(name: str, persistence: bool, initialize=False):
+    db = DB(name=name, in_memory=not persistence)
+    if initialize:  # new
+        db.create_tables()
     return db
 
 
@@ -94,9 +92,20 @@ class RepoAnalyzer:
         self._commit_count = None
 
         self._revs = None
-        if self.persistence:
-            global db
-            db = init_db(self.path.name)
+        self._db = init_db(self.path.name, self.persistence, initialize=True)
+
+    def __getstate__(self) -> object:
+        state = self.__dict__.copy()
+        # don't pickle _db. Necessary for joblib multiprocessing.
+        # if that can be removed, get rid of this.
+        del state["_db"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # don't pickle _db. Necessary for joblib multiprocessing.
+        # if that can be removed, get rid of this.
+        self._db = init_db(self.path.name, self.persistence, initialize=False)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -121,13 +130,15 @@ class RepoAnalyzer:
                 revs.extend(
                     FileChangeCommitRecord.from_git(c, self.path.name, by_file=True)
                 )
-            if self.persistence and db:
-                db.insert_file_changes(revs)
 
+            self._db.insert_file_changes(revs)
             self._revs = DataFrame(revs)
 
         count = self._revs.unique("sha").height
-        assert count == self.commit_count, f"Mismatch: {count} != {self.commit_count}"
+
+        assert count == self.commit_count == self._db.change_count(), (
+            f"Mismatch: {count} != {self.commit_count}"
+        )
         return self._revs
 
     @property
