@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
@@ -36,14 +37,28 @@ class DB:
                     authored_datetime DATETIME,
                     committed_datetime DATETIME,
                     filename VARCHAR,
-                    insertions UHUGEINT,
-                    deletions UHUGEINT,
-                    lines UHUGEINT,
+                    insertions UBIGINT,
+                    deletions UBIGINT,
+                    lines UBIGINT,
                     change_type VARCHAR(1),
                     is_binary BOOLEAN
                 );
             """)
         logger.info("Created tables")
+
+    def _check_group_by(self, group_by: str) -> str:
+        default = "author_email"
+        if group_by not in {
+            "author_email",
+            "author_name",
+            "commiter_name",
+            "committer_email",
+        }:
+            logger.warning(
+                f"Invalid group by key: {group_by}, using '{default}'",
+            )
+            return default
+        return group_by
 
     def insert_file_changes(self, revs: list[FileChangeCommitRecord]):
         to_insert = [
@@ -75,6 +90,7 @@ class DB:
                 )"""
         try:
             _ = self.con.executemany(query, to_insert)
+            return self.all_file_changes()
         except (duckdb.InvalidInputException, duckdb.ConversionException) as e:
             logger.error(f"Failure to insert file change records: {e}")
         logger.info(
@@ -93,23 +109,30 @@ class DB:
             "select count(distinct sha) as commit_count from file_changes"
         ).pl()["commit_count"][0]
 
-    def changes_per_file(self) -> DataFrame:
+    def commits_per_file(self) -> DataFrame:
         return self._execute_to_pl_df("""SELECT filename, count(DISTINCT sha) AS count
               FROM file_changes
               GROUP BY filename
               ORDER BY count DESC""")
 
-    def repo_summary(self) -> DataFrame:
-        return self._execute_to_pl_df()
+    def changes_and_deletions_per_file(self) -> DataFrame:
+        return self._execute_to_pl_df("""SELECT filename, sum(insertions + deletions) AS count
+              FROM file_changes
+              GROUP BY filename
+              ORDER BY count DESC""")
+
+    def all_file_changes(self) -> DataFrame:
+        return self._execute_to_pl_df("SELECT * from file_changes order by filename")
+
+    def get_latest_change_tuple(self) -> tuple[datetime, str]:
+        return tuple(
+            *self.con.sql(
+                "select authored_datetime, sha from file_changes order by authored_datetime desc limit 1"
+            ).fetchall()
+        )
 
     def changes_by_user(self, group_by: str) -> DataFrame:
+        group_by = self._check_group_by(group_by)
         # NOTE: you cannot use duckdb parameters to set group by clause, so do this to prevent injection
-        if group_by not in {
-            "author_email",
-            "author_name",
-            "commiter_name",
-            "committer_email",
-        }:
-            raise ValueError(f"Invalid group_by key: {group_by}")
         query = f"""SELECT {group_by}, count(DISTINCT sha) as count from file_changes GROUP BY {group_by} ORDER BY count"""
         return self._execute_to_pl_df(query)

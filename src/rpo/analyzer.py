@@ -122,18 +122,24 @@ class RepoAnalyzer:
     @property
     def revs(self):
         """The git revisions property."""
+        latest: tuple[datetime, str | None] = self._db.get_latest_change_tuple() or (
+            datetime.min,
+            None,
+        )
+        _, sha = latest
+
         if self._revs is None:
             revs: list[FileChangeCommitRecord] = []
+            rev_spec = self.repo.head if sha is None else f"{sha}...{self.repo.head}"
             for c in self.repo.iter_commits(
-                self.repo.head, no_merges=self.options.ignore_merges
+                rev_spec, no_merges=self.options.ignore_merges
             ):
                 revs.extend(
                     FileChangeCommitRecord.from_git(c, self.path.name, by_file=True)
                 )
 
-            self._db.insert_file_changes(revs)
-            self._revs = DataFrame(revs)
-
+            self._revs = self._db.insert_file_changes(revs)
+        assert self._revs is not None
         count = self._revs.unique("sha").height
 
         assert count == self.commit_count == self._db.change_count(), (

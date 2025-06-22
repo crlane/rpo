@@ -21,11 +21,16 @@ class Plotter:
         **kwargs,
     ):
         self.location = Path(location)
+
         self.plot_type = plot_type
         self.df = df
         self.plot_args = kwargs
 
     def plot(self):
+        if self.location.name.endswith(".png"):
+            _ = self.location.parent.mkdir(exist_ok=True, parents=True)
+        else:
+            _ = self.location.mkdir(exist_ok=True, parents=True)
         if self.plot_type == "cumulative_blame":
             self._plot_cumulative_blame()
         elif self.plot_type == "blame":
@@ -43,7 +48,6 @@ class Plotter:
             y=self.plot_args.get("y", "author_name"),
         ).properties(title=self.plot_args.get("title", "Blame"))
         if not self.location.name.endswith(".png"):
-            _ = self.location.mkdir(exist_ok=True, parents=True)
             self.location = self.location / self.plot_args.get(
                 "filename", f"repo_blame_{time.time()}.png"
             )
@@ -63,7 +67,6 @@ class Plotter:
             title=self.plot_args.get("title", "Cumulative Blame"),
         )
         if not self.location.name.endswith(".png"):
-            _ = self.location.mkdir(exist_ok=True, parents=True)
             self.location = self.location / self.plot_args.get(
                 "filename", f"cumulative_blame_{time.time()}.png"
             )
@@ -75,6 +78,5 @@ class Plotter:
         filename = self.plot_args.pop("filename", f"punchcard_{time.time()}.png")
         chart = self.df.plot.circle(**self.plot_args).properties(title=title)
         if not self.location.name.endswith(".png"):
-            _ = self.location.mkdir(exist_ok=True, parents=True)
             self.location = self.location / filename
         chart.save(self.location, ppi=DEFAULT_PPI)
