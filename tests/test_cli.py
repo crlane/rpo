@@ -18,6 +18,7 @@ def test_help(runner):
     assert result.exit_code == 0, "CLI command failed"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("identify_by", ["name", "email"])
 @pytest.mark.parametrize("subcommand", ["repo-blame", "cumulative-blame", "punchcard"])
 @pytest.mark.parametrize(
