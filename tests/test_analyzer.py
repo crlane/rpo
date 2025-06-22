@@ -1,3 +1,4 @@
+import polars as pl
 import pytest
 from git import Actor
 from git.repo import Repo
@@ -160,7 +161,12 @@ def test_punchcard(
         )
     )
     assert df.height == height
-    df_dict = df.to_dict(as_series=False)
+    df_dict = (
+        # rolling because sometimes commits are in different microseconds, leading to two rows instead of one in the aggregation
+        df.rolling("authored_datetime", period="1h", closed="both")
+        .agg(pl.sum(identifier))
+        .to_dict(as_series=False)
+    )
     assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
 
 

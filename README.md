@@ -134,3 +134,38 @@ Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
 
 - [git-truck](https://github.com/git-truck)
 - [busfactor](https://github.com/SOM-Research/busfactor)
+
+## References
+
+### Git Commands
+
+These are useful for validating results reported here. The git man pages for various commands is helpful reading.
+
+All the files edited in a revision
+```bash
+git diff-tree --no-commit-id --name-only HEAD~1 -r
+```
+
+All the files _present_ at a particular revision
+```bash
+git ls-tree -rlt HEAD
+
+All commits reachable from a revision
+```bash
+git rev-list HEAD --count
+```
+
+Count all commits reachable from a revision
+```bash
+git rev-list HEAD --count
+```
+
+All commits that touch a particular object (tree in this case)
+```bash
+git rev-list HEAD img
+```
+
+All files at each commit
+```bash
+git rev-list HEAD | xargs -r -I % git ls-tree -rt --name-only %
+```
