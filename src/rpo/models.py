@@ -170,7 +170,7 @@ def recursive_getattr(
         return recursive_getattr(getattr(obj, head), tail)
 
 
-class Commit(BaseModel):
+class FileChangeCommitRecord(BaseModel):
     repository: str
     sha: str
     authored_datetime: datetime
@@ -179,6 +179,7 @@ class Commit(BaseModel):
     committed_datetime: datetime
     committer_name: str
     committer_email: str | None
+
     summary: str
     gpgsig: str | None = None
     # file change info
@@ -187,6 +188,7 @@ class Commit(BaseModel):
     deletions: float | None = None
     lines: float | None = None
     change_type: Literal["M", "A", "D"] | None = None
+    is_binary: bool | None = None
 
     @classmethod
     def from_git(cls, git_commit: GitCommit, for_repo: str, by_file: bool = False):
@@ -207,5 +209,10 @@ class Commit(BaseModel):
             data = deepcopy(base)
             for f, changes in git_commit.stats.files.items():
                 data["filename"] = f
+                # if all the line change statistics are 0, it's a binary file
+                lines_changed = sum(
+                    changes.get(t, 0) for t in ("insertions", "deletions", "lines")
+                )
+                data["is_binary"] = not lines_changed
                 data.update(**changes)
                 yield cls(**data)
