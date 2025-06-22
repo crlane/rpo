@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from os import PathLike, process_cpu_count
 from pathlib import Path
@@ -10,20 +10,23 @@ from urllib.parse import quote
 
 import polars as pl
 import polars.selectors as cs
+from git import Actor
 from git.repo import Repo
 from git.repo.base import BlameEntry
+from git.types import Commit_ish
 from joblib import Parallel, delayed
 from polars import DataFrame
 
 from rpo.plotting import Plotter
 from rpo.types import SupportedPlotType
 
+from .db import DB
 from .models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     BusFactorCmdOptions,
-    Commit,
     DataSelectionOptions,
+    FileChangeCommitRecord,
     GitOptions,
     PunchcardCmdOptions,
     RevisionsCmdOptions,
@@ -32,6 +35,17 @@ from .models import (
 from .writer import Writer
 
 logger = logging.getLogger(__name__)
+
+LARGE_THRESHOLD = 10_000
+
+
+db: DB | None = None
+
+
+def init_db(name: str):
+    db = DB(name=name, in_memory=False)
+    db.create_tables()
+    return db
 
 
 class ProjectAnalyzer:
@@ -50,8 +64,10 @@ class RepoAnalyzer:
         repo: Repo | None = None,
         path: str | Path | None = None,
         options: GitOptions | None = None,
+        persistence: bool = False,
     ):
         self.options = options if options else GitOptions()
+        self.persistence = persistence
         if path:
             if isinstance(path, str):
                 path = Path(path)
@@ -75,7 +91,12 @@ class RepoAnalyzer:
                 "Repository has uncommitted changes! Please stash any changes or use `--allow-dirty`."
             )
 
+        self._commit_count = None
+
         self._revs = None
+        if self.persistence:
+            global db
+            db = init_db(self.path.name)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -84,13 +105,29 @@ class RepoAnalyzer:
         return pl.Series(name="filename", values=vals)
 
     @property
+    def commit_count(self):
+        if self._commit_count is None:
+            self._commit_count = self.repo.head.commit.count()
+        return self._commit_count
+
+    @property
     def revs(self):
         """The git revisions property."""
         if self._revs is None:
-            revs: list[Commit] = []
-            for c in self.repo.iter_commits(no_merges=self.options.ignore_merges):
-                revs.extend(Commit.from_git(c, self.path.name, by_file=True))
+            revs: list[FileChangeCommitRecord] = []
+            for c in self.repo.iter_commits(
+                self.repo.head, no_merges=self.options.ignore_merges
+            ):
+                revs.extend(
+                    FileChangeCommitRecord.from_git(c, self.path.name, by_file=True)
+                )
+            if self.persistence and db:
+                db.insert_file_changes(revs)
+
             self._revs = DataFrame(revs)
+
+        count = self._revs.unique("sha").height
+        assert count == self.commit_count, f"Mismatch: {count} != {self.commit_count}"
         return self._revs
 
     @property
@@ -102,6 +139,17 @@ class RepoAnalyzer:
                     self.options.branch = n
                     break
         return self.options.branch
+
+    @property
+    def is_large(self):
+        return self.commit_count > LARGE_THRESHOLD
+
+    def analyze(self):
+        """Perform initial analysis"""
+        if self.is_large:
+            logger.warning(
+                "Large repo with {self.commit_count} revisions, analysis will take a while"
+            )
 
     def _output(
         self,
@@ -252,7 +300,7 @@ class RepoAnalyzer:
         # so the number of lines items for each file is the number of lines in the
         # file at the specified revision
         # BlameEntry
-        blame_map: dict[str, Iterable[BlameEntry]] = {
+        blame_map: dict[str, Iterator[BlameEntry]] = {
             f: self.repo.blame_incremental(rev, f, rev_opts=rev_opts)
             for f in files_at_rev.filter(
                 options.glob_filter_expr(
@@ -263,18 +311,23 @@ class RepoAnalyzer:
         data: list[dict[str, Any]] = []
         for f, blame_entries in blame_map.items():
             for blame_entry in blame_entries:
+                commit: Commit_ish = blame_entry.commit
+                author: Actor = commit.author
+                committer: Actor = commit.committer
                 data.append(
                     {
                         "point_in_time": rev,
                         "filename": f,
-                        "sha": blame_entry.commit.hexsha,  # noqa
+                        "sha": commit.hexsha,
                         "line_range": blame_entry.linenos,
-                        "author_name": blame_entry.commit.author.name,  # noqa
-                        "author_email": blame_entry.commit.author.email.lower(),  # noqa
-                        "committer_name": blame_entry.commit.committer.name,  # noqa
-                        "committer_email": blame_entry.commit.committer.email.lower(),  # noqa
-                        "committed_datetime": blame_entry.commit.committed_datetime,  # noqa
-                        "authored_datetime": blame_entry.commit.authored_datetime,  # noqa
+                        "author_name": author.name,
+                        "author_email": author.email.lower() if author.email else "",
+                        "committer_name": committer.name,
+                        "committer_email": committer.email.lower()
+                        if committer.email
+                        else "",
+                        "committed_datetime": commit.committed_datetime,
+                        "authored_datetime": commit.authored_datetime,
                     }
                 )
 

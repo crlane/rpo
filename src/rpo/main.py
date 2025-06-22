@@ -116,6 +116,13 @@ logger = logging.getLogger(__name__)
     type=click.Path(readable=True, dir_okay=False),
     help="The location of the json formatted config file to use. Defaults to a hidden config.json file in the current working directory. If it exists, then options in the config file take precedence over command line flags.",
 )
+@click.option(
+    "--persist/--no-persist",
+    is_flag=True,
+    type=bool,
+    default=False,
+    help="Should the analysis be persisted to disk in a temporary location for reuse",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -136,6 +143,7 @@ def cli(
     aliases: dict[str, str] | None = None,
     limit: int | None = None,
     config_file: PathLike[str] | None = None,
+    persist: bool = False,
 ):
     _ = ctx.ensure_object(dict)
 
@@ -171,14 +179,19 @@ def cli(
 
         ctx.obj["config"] = config
 
+    repo_path = repository or Path.cwd()
+    if not isinstance(repo_path, Path):
+        repo_path = Path(repo_path)
+
     ctx.obj["analyzer"] = RepoAnalyzer(
-        path=repository or Path.cwd(),
+        path=repo_path,
         options=GitOptions(
             branch=branch,
             allow_dirty=allow_dirty,
             ignore_whitespace=ignore_whitespace,
             ignore_merges=ignore_merges,
         ),
+        persistence=persist,
     )
     ctx.obj["data_selection"] = dict(
         aggregate_by=aggregate_by,
