@@ -120,19 +120,21 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
 
 
 @pytest.mark.parametrize(
-    "identify_by,lines_count",
-    [("name", 3), ("email", 4)],
+    "identify_by,line_count",
+    [("name", 5), ("email", 3)],
     ids=("by-name", "by-email"),
 )
 def test_blame(
     tmp_repo_analyzer: RepoAnalyzer,
     actors: list[Actor],
     identify_by: IdentifyBy,
-    lines_count: int,
+    line_count: int,
 ):
     options = BlameCmdOptions(identify_by=identify_by)
     blame_report = tmp_repo_analyzer.blame(options).to_dict(as_series=False)
-    assert blame_report  # TODO: make assertion about line counts
+    flattened = dict(zip(blame_report[f"author_{identify_by}"], blame_report["lines"]))
+    actor = actors[-1]
+    assert flattened[getattr(actor, identify_by)] == line_count
 
 
 def test_bus_factor(tmp_repo_analyzer):
