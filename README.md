@@ -130,10 +130,10 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 
 ## Similar Projects and Inspiration
 
-Thanks to [GitPandas](https://github.com/wdm0006/git-pandas) for inspiration.
-
+- [GitPandas](https://github.com/wdm0006/git-pandas)
 - [git-truck](https://github.com/git-truck)
 - [busfactor](https://github.com/SOM-Research/busfactor)
+- [bus-factor-explorer](https://github.com/JetBrains-Research/bus-factor-explorer)
 
 ## References
 
@@ -149,6 +149,7 @@ git diff-tree --no-commit-id --name-only HEAD~1 -r
 All the files _present_ at a particular revision
 ```bash
 git ls-tree -rlt HEAD
+```
 
 All commits reachable from a revision
 ```bash
