@@ -10,3 +10,4 @@ wheels/
 .venv
 .secret_env
 TODO.md
+img

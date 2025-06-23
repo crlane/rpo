@@ -138,7 +138,7 @@ def test_blame(
 
 
 def test_bus_factor(tmp_repo_analyzer):
-    df = tmp_repo_analyzer.bus_factor(BusFactorCmdOptions())
+    _ = tmp_repo_analyzer.bus_factor(BusFactorCmdOptions())
     assert True
 
 
