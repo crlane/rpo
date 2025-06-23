@@ -295,3 +295,8 @@ def punchcard(ctx: click.Context, identifier: str):
     )
 
     _ = ra.punchcard(options)
+
+
+@cli.command
+def serve():
+    raise NotImplementedError()
