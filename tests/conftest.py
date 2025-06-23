@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
+from typing import Generator
 
 import pytest
-from git import GitCmdObjectDB
 from git.objects.util import Actor
 from git.repo import Repo
 
@@ -29,14 +29,13 @@ def repos_directory(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def cpython_repo(repos_directory: Path) -> Repo:
+def cpython_repo(repos_directory: Path) -> Generator[Repo]:
     remote_url = "https://github.com/python/cpython.git"
     path: str | os.PathLike[str] | None = os.getenv("LARGE_REPO_PATH")
     if not path:
-        r = Repo.clone_from(remote_url, to_path=repos_directory)
+        yield Repo.clone_from(remote_url, to_path=repos_directory)
     else:
-        r = Repo(path, odbt=GitCmdObjectDB)
-    yield r
+        yield Repo(path)
 
 
 @pytest.fixture(scope="session")
@@ -73,5 +72,5 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
 
 @pytest.fixture
 def tmp_repo_analyzer(tmp_repo: Repo) -> RepoAnalyzer:
-    ra = RepoAnalyzer(repo=tmp_repo)
+    ra = RepoAnalyzer(repo=tmp_repo, use_file_storage=False)
     return ra

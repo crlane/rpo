@@ -39,8 +39,8 @@ logger = logging.getLogger(__name__)
 LARGE_THRESHOLD = 10_000
 
 
-def init_db(name: str, persistence: bool, initialize=False):
-    db = DB(name=name, in_memory=not persistence)
+def init_db(name: str, use_file_storage: bool, initialize=False):
+    db = DB(name=name, in_memory=not use_file_storage)
     if initialize:  # new
         db.create_tables()
     return db
@@ -62,10 +62,10 @@ class RepoAnalyzer:
         repo: Repo | None = None,
         path: str | Path | None = None,
         options: GitOptions | None = None,
-        persistence: bool = False,
+        use_file_storage: bool = False,
     ):
         self.options = options if options else GitOptions()
-        self.persistence = persistence
+        self.use_file_storage = use_file_storage
         if path:
             if isinstance(path, str):
                 path = Path(path)
@@ -92,7 +92,7 @@ class RepoAnalyzer:
         self._commit_count = None
 
         self._revs = None
-        self._db = init_db(self.path.name, self.persistence, initialize=True)
+        self._db = init_db(self.path.name, self.use_file_storage, initialize=True)
 
     def __getstate__(self) -> object:
         state = self.__dict__.copy()
@@ -105,7 +105,7 @@ class RepoAnalyzer:
         self.__dict__.update(state)
         # don't pickle _db. Necessary for joblib multiprocessing.
         # if that can be removed, get rid of this.
-        self._db = init_db(self.path.name, self.persistence, initialize=False)
+        self._db = init_db(self.path.name, self.use_file_storage, initialize=False)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -122,12 +122,7 @@ class RepoAnalyzer:
     @property
     def revs(self):
         """The git revisions property."""
-        latest: tuple[datetime, str | None] = self._db.get_latest_change_tuple() or (
-            datetime.min,
-            None,
-        )
-        _, sha = latest
-
+        _, sha = self._db.get_latest_change_tuple()
         if self._revs is None:
             revs: list[FileChangeCommitRecord] = []
             rev_spec = self.repo.head if sha is None else f"{sha}...{self.repo.head}"
@@ -308,17 +303,17 @@ class RepoAnalyzer:
         rev = self.repo.head.commit.hexsha if rev is None else rev
         files_at_rev = self._file_names_at_rev(rev)
 
-        rev_opts: list[str] = []
-        if self.options.ignore_whitespace:
-            rev_opts.append("-w")
-        if self.options.ignore_merges:
-            rev_opts.append("--no-merges")
         # git blame for each file.
         # so the number of lines items for each file is the number of lines in the
         # file at the specified revision
         # BlameEntry
         blame_map: dict[str, Iterator[BlameEntry]] = {
-            f: self.repo.blame_incremental(rev, f, rev_opts=rev_opts)
+            f: self.repo.blame_incremental(
+                rev,
+                f,
+                w=self.options.ignore_whitespace,
+                no_merges=self.options.ignore_merges,
+            )
             for f in files_at_rev.filter(
                 options.glob_filter_expr(
                     files_at_rev,
