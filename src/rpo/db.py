@@ -124,12 +124,13 @@ class DB:
     def all_file_changes(self) -> DataFrame:
         return self._execute_to_pl_df("SELECT * from file_changes order by filename")
 
-    def get_latest_change_tuple(self) -> tuple[datetime, str]:
-        return tuple(
+    def get_latest_change_tuple(self) -> tuple[datetime, str | None]:
+        res = tuple(
             *self.con.sql(
                 "select authored_datetime, sha from file_changes order by authored_datetime desc limit 1"
             ).fetchall()
         )
+        return res or (datetime.min, None)
 
     def changes_by_user(self, group_by: str) -> DataFrame:
         group_by = self._check_group_by(group_by)

@@ -117,11 +117,11 @@ logger = logging.getLogger(__name__)
     help="The location of the json formatted config file to use. Defaults to a hidden config.json file in the current working directory. If it exists, then options in the config file take precedence over command line flags.",
 )
 @click.option(
-    "--persist/--no-persist",
+    "--persist-data/--no-persist-data",
     is_flag=True,
     type=bool,
     default=False,
-    help="Should the analysis be persisted to disk in a temporary location for reuse",
+    help="Should the analysis data be persisted to disk in a temporary location for reuse",
 )
 @click.pass_context
 def cli(
@@ -143,7 +143,7 @@ def cli(
     aliases: dict[str, str] | None = None,
     limit: int | None = None,
     config_file: PathLike[str] | None = None,
-    persist: bool = False,
+    persist_data: bool = False,
 ):
     _ = ctx.ensure_object(dict)
 
@@ -191,7 +191,7 @@ def cli(
             ignore_whitespace=ignore_whitespace,
             ignore_merges=ignore_merges,
         ),
-        persistence=persist,
+        use_file_storage=persist_data,
     )
     ctx.obj["data_selection"] = dict(
         aggregate_by=aggregate_by,
