@@ -39,14 +39,13 @@ jobs:
       - name: Run tests
         run: uv run py.test -m 'not integration'
 
-      - name: Lint with Ruff
+      - name: Install ruff
         uses: astral-sh/ruff-action@v3
         with:
           version: "latest"
+
+      - name: Lint with Ruff
         run: uv run ruff check -q
 
       - name: Check format with Ruff
-        uses: astral-sh/ruff-action@v3
-        with:
-          version: "latest"
         run: uv run ruff format -q
