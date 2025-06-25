@@ -23,9 +23,9 @@ def actors():
     return actors
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def repos_directory(tmp_path_factory) -> Path:
-    return tmp_path_factory.mktemp("repos")
+    return tmp_path_factory.mktemp("test-repos-")
 
 
 @pytest.fixture(scope="session")
@@ -72,5 +72,5 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
 
 @pytest.fixture
 def tmp_repo_analyzer(tmp_repo: Repo) -> RepoAnalyzer:
-    ra = RepoAnalyzer(repo=tmp_repo, use_file_storage=False)
+    ra = RepoAnalyzer(repo=tmp_repo, in_memory=True)
     return ra

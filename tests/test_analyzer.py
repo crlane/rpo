@@ -163,6 +163,7 @@ def test_punchcard(
         )
     )
     assert df.height == height
+    # TODO: this is sometimes flaky around minute boundaries
     df_dict = (
         # rolling because sometimes commits are in different microseconds, leading to two rows instead of one in the aggregation
         df.rolling("authored_datetime", period="1h", closed="both")
@@ -173,6 +174,6 @@ def test_punchcard(
 
 
 def test_revisions(tmp_repo_analyzer):
-    assert tmp_repo_analyzer.revisions(RevisionsCmdOptions()).height == 6, (
-        "Number of revisions incorrect"
-    )
+    res = tmp_repo_analyzer.revisions(RevisionsCmdOptions())
+
+    assert res.height == 6, "Number of revisions incorrect"

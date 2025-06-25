@@ -34,6 +34,7 @@ def test_plottable_subcommands(
         identify_by,
         "--plot",
         plot_path,
+        "--no-persist-data",
         subcommand,
     ]
     if subcommand == "punchcard":
