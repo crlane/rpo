@@ -1,11 +1,11 @@
 import functools
 import itertools
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from datetime import datetime
-from os import PathLike, process_cpu_count
+from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import quote
 
 import polars as pl
@@ -14,7 +14,7 @@ from git import Actor
 from git.repo import Repo
 from git.repo.base import BlameEntry
 from git.types import Commit_ish
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_config
 from polars import DataFrame
 
 from rpo.plotting import Plotter
@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 
 LARGE_THRESHOLD = 10_000
 
-
-def init_db(name: str, use_file_storage: bool, initialize=False):
-    db = DB(name=name, in_memory=not use_file_storage)
-    if initialize:  # new
-        db.create_tables()
-    return db
+type AnyCmdOptions = (
+    SummaryCmdOptions
+    | BlameCmdOptions
+    | PunchcardCmdOptions
+    | RevisionsCmdOptions
+    | ActivityReportCmdOptions
+    | BusFactorCmdOptions
+)
 
 
 class ProjectAnalyzer:
@@ -62,10 +64,9 @@ class RepoAnalyzer:
         repo: Repo | None = None,
         path: str | Path | None = None,
         options: GitOptions | None = None,
-        use_file_storage: bool = False,
+        in_memory: bool = False,
     ):
         self.options = options if options else GitOptions()
-        self.use_file_storage = use_file_storage
         if path:
             if isinstance(path, str):
                 path = Path(path)
@@ -92,20 +93,7 @@ class RepoAnalyzer:
         self._commit_count = None
 
         self._revs = None
-        self._db = init_db(self.path.name, self.use_file_storage, initialize=True)
-
-    def __getstate__(self) -> object:
-        state = self.__dict__.copy()
-        # don't pickle _db. Necessary for joblib multiprocessing.
-        # if that can be removed, get rid of this.
-        del state["_db"]
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        # don't pickle _db. Necessary for joblib multiprocessing.
-        # if that can be removed, get rid of this.
-        self._db = init_db(self.path.name, self.use_file_storage, initialize=False)
+        self._db = DB(name=self.path.name, in_memory=in_memory, initialize=True)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -125,7 +113,11 @@ class RepoAnalyzer:
         _, sha = self._db.get_latest_change_tuple()
         if self._revs is None:
             revs: list[FileChangeCommitRecord] = []
-            rev_spec = self.repo.head if sha is None else f"{sha}...{self.repo.head}"
+            rev_spec = (
+                self.repo.head.commit.hexsha
+                if sha is None
+                else f"{sha}...{self.repo.head.commit.hexsha}"
+            )
             for c in self.repo.iter_commits(
                 rev_spec, no_merges=self.options.ignore_merges
             ):
@@ -134,13 +126,40 @@ class RepoAnalyzer:
                 )
 
             self._revs = self._db.insert_file_changes(revs)
+
         assert self._revs is not None
         count = self._revs.unique("sha").height
 
-        assert count == self.commit_count == self._db.change_count(), (
-            f"Mismatch: {count} != {self.commit_count}"
+        assert count == self._db.change_count(), (
+            "Mismatch of database and dataframe sha counts"
         )
+        if count != self.commit_count:
+            logger.warning(
+                f"Excluding {self.commit_count - count} commits due to settings"
+            )
         return self._revs
+
+    def filtered_revs(self, options: AnyCmdOptions, ignore_limit=False):
+        df = (
+            self.revs.with_columns(
+                pl.col(options.group_by_key).replace(options.aliases)
+            )
+            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
+            .filter(
+                options.glob_filter_expr(
+                    self.revs["filename"],
+                )
+            )
+        )
+        if not ignore_limit:
+            if not options.limit or options.limit <= 0:
+                df = df.sort(by=options.sort_key)
+            elif options.sort_descending:
+                df = df.bottom_k(options.limit, by=options.sort_key)
+            else:
+                df = df.top_k(options.limit, by=options.sort_key)
+
+        return df
 
     @property
     def default_branch(self):
@@ -165,11 +184,7 @@ class RepoAnalyzer:
 
     def _output(
         self,
-        options: SummaryCmdOptions
-        | BlameCmdOptions
-        | PunchcardCmdOptions
-        | RevisionsCmdOptions
-        | ActivityReportCmdOptions,
+        options: AnyCmdOptions,
         output_df: DataFrame,
         plot_df: DataFrame | None = None,
         plot_type: SupportedPlotType | None = None,
@@ -204,9 +219,7 @@ class RepoAnalyzer:
 
     def summary(self, options: SummaryCmdOptions) -> DataFrame:
         """A simple summary with counts of files, contributors, commits."""
-        df = self.revs.with_columns(
-            pl.col(options.group_by_key).replace(options.aliases)
-        )
+        df = self.filtered_revs(options)
         summary_df = DataFrame(
             {
                 "name": df["repository"].unique(),
@@ -221,57 +234,25 @@ class RepoAnalyzer:
         return summary_df
 
     def revisions(self, options: RevisionsCmdOptions):
-        df = self.revs.with_columns(
-            pl.col(options.group_by_key).replace(options.aliases)
-        ).filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-
-        if not options.limit or options.limit <= 0:
-            revision_df = df.sort(by=options.sort_key)
-        elif options.sort_descending:
-            revision_df = df.bottom_k(options.limit, by=options.sort_key)
-        else:
-            revision_df = df.top_k(options.limit, by=options.sort_key)
+        revision_df = self.filtered_revs(options)
         self._output(options, revision_df)
         return revision_df
 
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         report_df = (
-            self.revs.with_columns(
-                pl.col(options.group_by_key).replace(options.aliases)
-            )
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-            .filter(
-                options.glob_filter_expr(
-                    self.revs["filename"],
-                )
-            )
+            self.filtered_revs(options)
             .group_by(options.group_by_key)
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
         )
-
-        if not options.limit or options.limit <= 0:
-            report_df = report_df.sort(by=options.sort_key)
-        elif options.sort_descending:
-            report_df = report_df.bottom_k(options.limit, by=options.sort_key)
-        else:
-            report_df = report_df.top_k(options.limit, by=options.sort_key)
         self._output(options, report_df)
         return report_df
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         report_df = (
-            self.revs.with_columns(
-                pl.col(options.group_by_key).replace(options.aliases)
-            )
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-            .filter(
-                options.glob_filter_expr(
-                    self.revs["filename"],
-                )
-            )
+            self.filtered_revs(options)
             .group_by("filename")
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
@@ -282,12 +263,6 @@ class RepoAnalyzer:
         ):
             logger.warning("Invalid sort key for this report, using `filename`...")
             options.sort_by = "filename"
-        if not options.limit or options.limit <= 0:
-            report_df = report_df.sort(by=options.sort_key)
-        elif options.sort_descending:
-            report_df = report_df.bottom_k(options.limit, by=options.sort_key)
-        else:
-            report_df = report_df.top_k(options.limit, by=options.sort_key)
         self._output(options, report_df)
         return report_df
 
@@ -374,29 +349,28 @@ class RepoAnalyzer:
         return agg_df
 
     def cumulative_blame(
-        self, options: BlameCmdOptions, batch_size=25, data_field="lines"
+        self, options: BlameCmdOptions, batch_size=15, data_field="lines"
     ) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
         total = DataFrame()
         rev_batches = itertools.batched(
-            self.revs.with_columns(
-                pl.col(options.group_by_key).replace(options.aliases)
-            )
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
+            self.filtered_revs(options, ignore_limit=True)
             .sort(cs.temporal())
-            .select(pl.col("sha"), pl.col("committed_datetime"))
-            .unique()
+            .select(pl.col(("sha", "committed_datetime")))
+            .unique("sha", keep="first", maintain_order=True)
             .iter_rows(),
             n=batch_size,
         )
 
+        # this has to receive a pickleable object, so list instead of iterable
         def _get_blame_for_batches(
             rev_batch: Iterable[tuple[str, datetime]],
         ) -> DataFrame:
             results = DataFrame()
             for rev_sha, dt in itertools.chain(rev_batch):
+                print(rev_sha, dt)
                 blame_df = self.blame(
                     options, rev_sha, data_field=data_field, headless=True
                 )
@@ -406,16 +380,18 @@ class RepoAnalyzer:
                         name="datetime", values=itertools.repeat(dt, blame_df.height)
                     ),
                 )
-                results = results.vstack(blame_df)
+                _ = results.vstack(blame_df, in_place=True)
             return results
 
-        machine_cpu_count: int = process_cpu_count() or 2
-        blame_frames_batched = Parallel(
-            n_jobs=max(2, machine_cpu_count), return_as="generator"
-        )(delayed(_get_blame_for_batches)(b) for b in rev_batches)
+        total = DataFrame()
+
+        with parallel_config(n_jobs=-2):
+            blame_frames_batched = Parallel(return_as="generator", verbose=40)(
+                delayed(_get_blame_for_batches)(b) for b in rev_batches
+            )
 
         for blame_dfs in blame_frames_batched:
-            total = pl.concat([total, blame_dfs])
+            _ = total.vstack(blame_dfs, in_place=True)
 
         pivot_df = (
             total.pivot(
@@ -441,21 +417,17 @@ class RepoAnalyzer:
         return total
 
     def bus_factor(self, options: BusFactorCmdOptions) -> DataFrame:
-        df = self.revs.with_columns(
-            pl.col(options.group_by_key)
-            .replace(options.aliases)
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-        )
+        if options.limit:
+            logger.warning(
+                "Limit suggested for comprehensive analysis that requires all commits not explicitly excluded (generated files or glob), will ignore limit"
+            )
+        df = self.filtered_revs(options, ignore_limit=True)
         return df
 
     def punchcard(self, options: PunchcardCmdOptions) -> DataFrame:
         self._check_agg_and_id_options(options)
         df = (
-            self.revs.with_columns(
-                pl.col(options.group_by_key).replace(options.aliases)
-            )
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-            .filter(options.glob_filter_expr(self.revs["filename"]))
+            self.filtered_revs(options)
             .filter(pl.col(options.group_by_key) == options.identifier)
             .pivot(
                 options.group_by_key,

@@ -4,3 +4,7 @@ class InvalidSortKey(Exception):
 
 class InvalidAggregationOption(Exception):
     pass
+
+
+class InvalidIdentificationOption(Exception):
+    pass
