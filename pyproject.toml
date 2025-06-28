@@ -5,7 +5,7 @@ description = "Repository Participation Observer. A tool for investigation git r
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 authors = [
   {name = "Cameron Lane", email = "crlane@adamanteus.com"},
 ]
@@ -30,10 +30,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "gitpython>=3.1.44",
     "ipdb>=0.13.13",
     "pytest>=8.4.0",
     "pytest-cov>=6.1.1",
     "pytest-repeat>=0.9.4",
+    "semver>=3.0.4",
 ]
 
 [project.urls]

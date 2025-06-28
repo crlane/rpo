@@ -93,6 +93,7 @@ class RepoAnalyzer:
         self._commit_count = None
 
         self._revs = None
+
         self._db = DB(name=self.path.name, in_memory=in_memory, initialize=True)
 
     @functools.cache
@@ -370,7 +371,6 @@ class RepoAnalyzer:
         ) -> DataFrame:
             results = DataFrame()
             for rev_sha, dt in itertools.chain(rev_batch):
-                print(rev_sha, dt)
                 blame_df = self.blame(
                     options, rev_sha, data_field=data_field, headless=True
                 )
