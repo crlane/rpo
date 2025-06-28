@@ -20,12 +20,15 @@ def test_help(runner):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("identify_by", ["name", "email"])
+@pytest.mark.parametrize(
+    "persistence", ["--persist-data", "--no-persist-data"], ids=("file", "memory")
+)
 @pytest.mark.parametrize("subcommand", ["repo-blame", "cumulative-blame", "punchcard"])
 @pytest.mark.parametrize(
     "plot_path", ["img", "img/some_blame_file.png"], ids=("directory", "filename")
 )
 def test_plottable_subcommands(
-    plot_path, subcommand, identify_by, runner, tmp_repo, actors
+    plot_path, subcommand, persistence, identify_by, runner, tmp_repo, actors
 ):
     args = [
         "-r",
@@ -34,7 +37,7 @@ def test_plottable_subcommands(
         identify_by,
         "--plot",
         plot_path,
-        "--no-persist-data",
+        persistence,
         subcommand,
     ]
     if subcommand == "punchcard":

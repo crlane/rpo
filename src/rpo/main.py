@@ -279,6 +279,7 @@ def cumulative_blame(ctx: click.Context):
     options = BlameCmdOptions(
         **ctx.obj.get("data_selection"), **ctx.obj.get("output", {})
     )
+
     _ = ra.cumulative_blame(options)
 
 

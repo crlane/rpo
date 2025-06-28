@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from typing import Generator
 
@@ -25,7 +26,7 @@ def actors():
 
 @pytest.fixture(scope="session", autouse=True)
 def repos_directory(tmp_path_factory) -> Path:
-    return tmp_path_factory.mktemp("test-repos-")
+    return tmp_path_factory.mktemp(f"test-repos-{time.time()}-")
 
 
 @pytest.fixture(scope="session")

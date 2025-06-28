@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from multiprocessing import Lock
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Iterator
@@ -13,14 +14,18 @@ from rpo.models import FileChangeCommitRecord
 logger = logging.getLogger(__name__)
 
 
+global_lock = Lock()
+gconnection = duckdb.connect()
+
+
 class DB:
     def __init__(self, name: str, initialize=False, in_memory=False) -> None:
         self.name = name
 
         self._in_memory = in_memory
         self._file_path = None
-        self._conn = None
 
+        self._created = False
         if initialize:
             self.create_tables()
 
@@ -36,35 +41,22 @@ class DB:
         return self._file_path
 
     @property
-    def conn(self):
-        if self._conn is None:
-            self._conn = duckdb.connect(self.file_path)
-        return self._conn
-
-    def __getstate__(self) -> object:
-        state = self.__dict__.copy()
-        # don't pickle _db. Necessary for joblib multiprocessing.
-        # if that can be removed, get rid of this.
-        del state["_conn"]
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        # don't pickle connection . Necessary for joblib multiprocessing.
-        # if that can be removed, get rid of this.
-        self._conn = duckdb.connect(self.file_path)
-        if self._in_memory:
-            self.create_tables()
+    def conn(self) -> duckdb.DuckDBPyConnection:
+        global gconnection
+        if not self._in_memory and not self._created:
+            gconnection = duckdb.connect(self.file_path).cursor()
+            self._created = True
+        return gconnection
 
     def _execute_many(self, query, data):
         return self.conn.executemany(query, data)
 
     def _execute(
-        self, query, params: list[Any] | dict[str, Any] | None = None
+        self,
+        query,
+        params: list[Any] | dict[str, Any] | None = None,
     ) -> DataFrame:
-        if params:
-            return self.conn.execute(query, params).pl()
-        return self.conn.execute(query).pl()
+        return self.conn.execute(query, params).pl()
 
     def _execute_sql(self, query):
         return self.conn.sql(query)
@@ -118,7 +110,7 @@ class DB:
     def sha_file_datetime(self):
         """gets filenames and the date of the commit"""
         return self._execute(
-            "SELECT committed_datetime, sf.sha, sf.filename FROM file_changes fc JOIN sha_files sf ON fc.sha = sf.sha"
+            "SELECT committed_datetime, sf.sha, sf.filename FROM file_changes fc JOIN sha_files sf ON fc.sha = sf.sha",
         ).sort(by="filename")
 
     def author_file_change_report(self, author: str, by: str = "email"):
@@ -127,7 +119,10 @@ class DB:
         query = f"""SELECT author_{by}, filename, sum(lines) FROM file_changes
                WHERE author_{by} = $1
                GROUP BY author_email, filename"""
-        return self._execute(query, [author])
+        return self._execute(
+            query,
+            [author],
+        )
 
     def insert_file_changes(self, revs: list[FileChangeCommitRecord]):
         to_insert = [
@@ -167,31 +162,35 @@ class DB:
 
     def change_count(self) -> int:
         return self._execute(
-            "select count(distinct sha) as commit_count from file_changes"
+            "select count(distinct sha) as commit_count from file_changes",
         )["commit_count"][0]
 
     def commits_per_file(self) -> DataFrame:
-        return self._execute("""SELECT filename, count(DISTINCT sha) AS count
+        return self._execute(
+            """SELECT filename, count(DISTINCT sha) AS count
               FROM file_changes
               GROUP BY filename
-              ORDER BY count DESC""")
+              ORDER BY count DESC""",
+        )
 
     def changes_and_deletions_per_file(self) -> DataFrame:
-        return self._execute("""SELECT filename, sum(insertions + deletions) AS count
+        return self._execute(
+            """SELECT filename, sum(insertions + deletions) AS count
               FROM file_changes
               GROUP BY filename
-              ORDER BY count DESC""")
+              ORDER BY count DESC""",
+        )
 
     def all_file_changes(self) -> DataFrame:
-        return self._execute("SELECT * from file_changes order by filename")
+        return self._execute(
+            "SELECT * from file_changes order by filename",
+        )
 
     def get_latest_change_tuple(self) -> tuple[datetime, str | None]:
-        res = tuple(
-            *self._execute_sql(
-                "select authored_datetime, sha from file_changes order by authored_datetime desc limit 1"
-            ).fetchall()
-        )
-        return res or (datetime.min, None)
+        res = self._execute_sql(
+            "SELECT authored_datetime, sha FROM file_changes ORDER BY authored_datetime DESC LIMIT 1",
+        ).fetchall()
+        return tuple(*res) or (datetime.min, None)
 
     def changes_by_user(self, group_by: str) -> DataFrame:
         group_by = self._check_group_by(group_by)
