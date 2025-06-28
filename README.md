@@ -170,3 +170,11 @@ All files at each commit
 ```bash
 git rev-list HEAD | xargs -r -I % git ls-tree -rt --name-only %
 ```
+
+```bash
+git cat-file --batch-all-objects --batch-check --unordered
+```
+
+```bash
+git rev-list --all --objects --filter=object:type=blob HEAD | git cat-file --batch-check="%(objectname) %(objecttype) %(rest) %(deltabase)"
+```

@@ -11,7 +11,7 @@ PLOT_DIR=${PLOT_DIR:-$(pwd)/img/$(basename "$REPO")}
 BY=${BY:-email}
 
 echo "**** SUMMARY ****"
-uv run rpo -r "$REPO" -o - summary
+uv run rpo -r "$REPO" -o - --persist-data summary
 printf "\n\n\n"
 
 echo "**** REVISIONS ****"
