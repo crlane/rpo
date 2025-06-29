@@ -1,4 +1,3 @@
-import polars as pl
 import pytest
 from git import Actor
 from git.repo import Repo
@@ -13,7 +12,7 @@ from rpo.models import (
     RevisionsCmdOptions,
     SummaryCmdOptions,
 )
-from rpo.types import IdentifyBy
+from rpo.types import AggregateBy, IdentifyBy
 
 
 def test_fail_no_path_no_repo():
@@ -143,33 +142,43 @@ def test_bus_factor(tmp_repo_analyzer):
 
 
 @pytest.mark.parametrize(
-    "identifier,by,height,count",
+    "identifier,identify_by,aggregate_by,days_committed,count",
     [
         (
             "updated@example.com",
             "email",
-            1,
+            "author",
+            2,
             4,
         ),
-        ("User2 Lastname", "name", 1, 7),
+        ("User2 Lastname", "name", "author", 3, 7),
+        (
+            "updated@example.com",
+            "email",
+            "committer",
+            2,
+            4,
+        ),
+        ("User2 Lastname", "name", "committer", 3, 7),
     ],
 )
 def test_punchcard(
-    tmp_repo_analyzer, identifier: str, by: IdentifyBy, height: int, count: int
+    tmp_repo_analyzer,
+    identifier: str,
+    identify_by: IdentifyBy,
+    aggregate_by: AggregateBy,
+    days_committed: int,
+    count: int,
 ):
     df = tmp_repo_analyzer.punchcard(
         PunchcardCmdOptions(
-            identifier=identifier, identify_by=by, aggregate_by="author"
+            identifier=identifier,
+            identify_by=identify_by,
+            aggregate_by=aggregate_by,
         )
     )
-    assert df.height == height
-    # TODO: this is sometimes flaky around minute boundaries
-    df_dict = (
-        # rolling because sometimes commits are in different microseconds, leading to two rows instead of one in the aggregation
-        df.rolling("authored_datetime", period="1h", closed="both")
-        .agg(pl.sum(identifier))
-        .to_dict(as_series=False)
-    )
+    assert df.height == days_committed
+    df_dict = df.to_dict(as_series=False)
     assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
 
 
