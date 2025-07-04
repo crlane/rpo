@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
@@ -13,6 +14,7 @@ from .models import FileChangeCommitRecord
 logger = logging.getLogger(__name__)
 
 
+lock = multiprocessing.Lock()
 gconnection = duckdb.connect()
 
 
@@ -44,7 +46,8 @@ class DB:
         if not self._in_memory and not self._created:
             gconnection = duckdb.connect(self.file_path).cursor()
             self._created = True
-        return gconnection
+        with lock:
+            return gconnection
 
     def _execute_many(self, query, data):
         return self.conn.executemany(query, data)
