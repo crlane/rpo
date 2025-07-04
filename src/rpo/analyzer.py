@@ -1,5 +1,6 @@
 import functools
 import logging
+import os
 import time
 from collections.abc import Iterator
 from datetime import datetime
@@ -34,6 +35,8 @@ from .types import SupportedPlotType
 logger = logging.getLogger(__name__)
 
 LARGE_THRESHOLD = 10_000
+
+max_cpu_count = 2 if os.getenv("CI") else os.process_cpu_count()
 
 type AnyCmdOptions = (
     SummaryCmdOptions
@@ -353,7 +356,7 @@ class RepoAnalyzer:
 
         total = DataFrame()
 
-        with Pool() as p:
+        with Pool(processes=max_cpu_count) as p:
             fn = functools.partial(self._blame_with_dt, options=options, headless=True)
             blame_frame_results = p.starmap(
                 fn,
