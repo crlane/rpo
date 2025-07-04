@@ -418,7 +418,7 @@ class RepoAnalyzer:
             y="day(time):O",
             color="sum(count):Q",
             size="sum(count):Q",
-            title="{options.identifier} Punchcard".title(),
+            title=f"{options.identifier} Punchcard".title(),
             filename=f"{self.name}_punchcard_{quote(options.identifier)}",
         )
         return df
