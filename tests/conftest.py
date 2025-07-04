@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Generator
 
@@ -47,14 +48,30 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
 
     files: list[Path] = []
     for i, a in enumerate(actors):
-        f = d / f"{i}line.txt"
+        line_count = i + 1
+        commit_date = datetime.now(UTC) + timedelta(days=(-7 + line_count))
+        author_date = commit_date + timedelta(days=-1)
+        f = d / f"{line_count}_line.txt"
         files.append(f)
-        _ = f.write_text("\n".join(str(j) for j in range(i + 1)))
+        _ = f.write_text("\n".join(str(j) for j in range(line_count)))
         _ = r.index.add(f)
-        _ = r.index.commit(f"test commit {i}", author=a)
+        _ = r.index.commit(
+            f"test commit with {line_count} lines",
+            author=actors[i],
+            author_date=author_date,
+            commit_date=commit_date,
+            committer=actors[i],
+        )
 
+    remove_file_date = datetime.now(UTC) + timedelta(days=4)
     _ = r.index.remove(files[0])
-    _ = r.index.commit("remove file", author=actors[0])
+    _ = r.index.commit(
+        "remove file",
+        author=actors[0],
+        author_date=remove_file_date + timedelta(days=-1),
+        commit_date=remove_file_date,
+        committer=actors[0],
+    )
 
     # author 3, adds one file with three lines, duplicates contents, then deletes first line
     f = files[-1]
@@ -63,11 +80,20 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
     _ = r.index.add(f)
 
     actors[-1].email = "updated@example.com"
-    _ = r.index.commit("additions with new email", author=actors[-1])
+    _ = r.index.commit(
+        "additions with new email", author=actors[-1], committer=actors[-1]
+    )
 
+    truncate_date = datetime.now(UTC) + timedelta(days=3)
     _ = f.write_text("\n".join(f.read_text().splitlines()[1:]))
     _ = r.index.add(f)
-    _ = r.index.commit("truncate_file", author=actors[-1])
+    _ = r.index.commit(
+        "truncate_file",
+        author=actors[-1],
+        committer=actors[-1],
+        author_date=truncate_date + timedelta(days=-1),
+        commit_date=truncate_date,
+    )
     return r
 
 

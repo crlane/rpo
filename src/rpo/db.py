@@ -1,6 +1,6 @@
 import logging
+import multiprocessing
 from datetime import datetime
-from multiprocessing import Lock
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Iterator
@@ -8,13 +8,13 @@ from typing import Any, Iterator
 import duckdb
 from polars import DataFrame
 
-from rpo.exceptions import InvalidIdentificationOption
-from rpo.models import FileChangeCommitRecord
+from .exceptions import InvalidIdentificationOption
+from .models import FileChangeCommitRecord
 
 logger = logging.getLogger(__name__)
 
 
-global_lock = Lock()
+lock = multiprocessing.Lock()
 gconnection = duckdb.connect()
 
 
@@ -46,7 +46,8 @@ class DB:
         if not self._in_memory and not self._created:
             gconnection = duckdb.connect(self.file_path).cursor()
             self._created = True
-        return gconnection
+        with lock:
+            return gconnection
 
     def _execute_many(self, query, data):
         return self.conn.executemany(query, data)

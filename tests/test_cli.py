@@ -13,32 +13,44 @@ def runner():
         yield runner
 
 
-def test_help(runner):
+def test_top_level_help(runner):
     result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0, "CLI command failed"
+
+
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        "summary",
+        "revisions",
+        "blame",
+        "cumulative-blame",
+    ],
+)
+def test_subcommand_help(runner, subcommand):
+    result = runner.invoke(cli, [subcommand, "--help"])
     assert result.exit_code == 0, "CLI command failed"
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("identify_by", ["name", "email"])
 @pytest.mark.parametrize(
-    "persistence", ["--persist-data", "--no-persist-data"], ids=("file", "memory")
+    "persistence", ["--persist-data", "--no-persist-data"], ids=("persist", "inmemory")
 )
-@pytest.mark.parametrize("subcommand", ["repo-blame", "cumulative-blame", "punchcard"])
-@pytest.mark.parametrize(
-    "plot_path", ["img", "img/some_blame_file.png"], ids=("directory", "filename")
-)
+@pytest.mark.parametrize("subcommand", ["blame", "cblame", "punchcard"])
 def test_plottable_subcommands(
-    plot_path, subcommand, persistence, identify_by, runner, tmp_repo, actors
+    subcommand, persistence, identify_by, runner, tmp_repo, actors
 ):
     args = [
-        "-r",
+        "-p",
         tmp_repo.working_dir,
-        "-I",
-        identify_by,
-        "--plot",
-        plot_path,
         persistence,
         subcommand,
+        "-I",
+        identify_by,
+        "--visualize",
+        "--img-location",
+        "./img",
     ]
     if subcommand == "punchcard":
         args.append(getattr(actors[-1], identify_by))
@@ -46,7 +58,7 @@ def test_plottable_subcommands(
     assert result.exit_code == 0, (
         f"CLI command failed, Output: {result.output}\nExc: {result.exc_info}"
     )
-    p = Path(plot_path)
+    p = Path("./img")
     assert p.exists(), "Plot path does not exist"
     if p.is_dir():
         assert len(list(p.glob("*.png"))) == 1, "Image file DNE"
