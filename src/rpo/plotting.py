@@ -4,8 +4,7 @@ from pathlib import Path
 
 from polars import DataFrame
 
-from rpo.models import PlotOptions
-
+from .models import PlotOptions
 from .types import SupportedPlotType
 
 logger = logging.getLogger(__name__)
