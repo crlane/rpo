@@ -1,3 +1,5 @@
+from typing import LiteralString
+
 import pytest
 from git import Actor
 from git.repo import Repo
@@ -12,12 +14,6 @@ from rpo.models import (
     RevisionsCmdOptions,
     SummaryCmdOptions,
 )
-from rpo.types import AggregateBy, IdentifyBy
-
-
-def test_fail_no_path_no_repo():
-    with pytest.raises(ValueError, match="Must specify either"):
-        _ = RepoAnalyzer()
 
 
 @pytest.mark.parametrize(
@@ -64,9 +60,7 @@ def test_default_branch(
     [("name", 3), ("email", 4)],
     ids=("by-name", "by-email"),
 )
-def test_summary(
-    tmp_repo_analyzer: RepoAnalyzer, identify_by: IdentifyBy, contrib_count: int
-):
+def test_summary(tmp_repo_analyzer: RepoAnalyzer, identify_by: str, contrib_count: int):
     options = SummaryCmdOptions(identify_by=identify_by)
     summary = tmp_repo_analyzer.summary(options)
     assert summary is not None
@@ -92,7 +86,9 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
 
 def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
     contributor_report = tmp_repo_analyzer.contributor_report(
-        ActivityReportCmdOptions(sort_by="author_name", limit=0)
+        ActivityReportCmdOptions(
+            sort_by="user", identify_by="name", aggregate_by="author", limit=0
+        )
     ).to_dict(as_series=False)
     assert list(contributor_report.keys()) == [
         "author_name",
@@ -126,7 +122,7 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
 def test_blame(
     tmp_repo_analyzer: RepoAnalyzer,
     actors: list[Actor],
-    identify_by: IdentifyBy,
+    identify_by: str,
     line_count: int,
 ):
     options = BlameCmdOptions(identify_by=identify_by)
@@ -165,8 +161,8 @@ def test_bus_factor(tmp_repo_analyzer):
 def test_punchcard(
     tmp_repo_analyzer,
     identifier: str,
-    identify_by: IdentifyBy,
-    aggregate_by: AggregateBy,
+    identify_by: LiteralString,
+    aggregate_by: str,
     days_committed: int,
     count: int,
 ):

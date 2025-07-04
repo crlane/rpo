@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from multiprocessing import Lock
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any, Iterator
@@ -8,13 +7,12 @@ from typing import Any, Iterator
 import duckdb
 from polars import DataFrame
 
-from rpo.exceptions import InvalidIdentificationOption
-from rpo.models import FileChangeCommitRecord
+from .exceptions import InvalidIdentificationOption
+from .models import FileChangeCommitRecord
 
 logger = logging.getLogger(__name__)
 
 
-global_lock = Lock()
 gconnection = duckdb.connect()
 
 

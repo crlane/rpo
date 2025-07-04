@@ -1,11 +1,11 @@
 import functools
-import itertools
 import logging
+import time
 from collections.abc import Iterator
 from datetime import datetime
-from os import PathLike
+from multiprocessing import Pool
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import quote
 
 import polars as pl
@@ -14,25 +14,22 @@ from git import Actor
 from git.repo import Repo
 from git.repo.base import BlameEntry
 from git.types import Commit_ish
-from joblib import Parallel, delayed, parallel_config
 from polars import DataFrame
-
-from rpo.plotting import Plotter
-from rpo.types import SupportedPlotType
 
 from .db import DB
 from .models import (
     ActivityReportCmdOptions,
     BlameCmdOptions,
     BusFactorCmdOptions,
-    DataSelectionOptions,
     FileChangeCommitRecord,
     GitOptions,
+    OutputOptions,
     PunchcardCmdOptions,
     RevisionsCmdOptions,
     SummaryCmdOptions,
 )
-from .writer import Writer
+from .plotting import Plotter
+from .types import SupportedPlotType
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +45,6 @@ type AnyCmdOptions = (
 )
 
 
-class ProjectAnalyzer:
-    def __init__(self, project: PathLike[str]):
-        self.path = Path(project)
-
-
 class RepoAnalyzer:
     """
     `RepoAnalyzer` connects `git.repo.Repo` to polars dataframes
@@ -61,40 +53,36 @@ class RepoAnalyzer:
 
     def __init__(
         self,
-        repo: Repo | None = None,
-        path: str | Path | None = None,
         options: GitOptions | None = None,
+        repo: Repo | None = None,
         in_memory: bool = False,
     ):
-        self.options = options if options else GitOptions()
-        if path:
-            if isinstance(path, str):
-                path = Path(path)
-            if (path / ".git").exists():
-                self.path = path
-                self.repo = Repo(path)
-            else:
-                raise ValueError("Specified path does not contain '.git' directory")
-        elif repo:
+        self.options = options or GitOptions()
+        if self.options.path is None and repo is None:
+            raise ValueError("Must supply either repository path or a git.Repo object")
+
+        if repo is not None:
             self.repo = repo
-            self.path = Path(repo.common_dir).parent
+            self.options.path = Path(repo.common_dir).parent
+        elif (self.options.path / ".git").exists():
+            self.repo = Repo(self.options.path)
         else:
-            raise ValueError("Must specify either a `path` or pass a Repo object")
+            raise ValueError("Specified path does not contain '.git' directory")
 
         if self.repo.bare:
             raise ValueError(
                 "Repository has no commits! Please check the path and/or unstage any changes"
             )
-        elif self.repo.is_dirty() and not self.options.allow_dirty:
-            raise ValueError(
-                "Repository has uncommitted changes! Please stash any changes or use `--allow-dirty`."
-            )
+        elif self.repo.is_dirty():
+            logger.warning("Repository has uncommitted changes! Proceed with caution.")
 
         self._commit_count = None
 
         self._revs = None
 
-        self._db = DB(name=self.path.name, in_memory=in_memory, initialize=True)
+        self.name = self.options.path.name
+
+        self._db = DB(name=self.name, in_memory=in_memory, initialize=True)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -122,9 +110,7 @@ class RepoAnalyzer:
             for c in self.repo.iter_commits(
                 rev_spec, no_merges=self.options.ignore_merges
             ):
-                revs.extend(
-                    FileChangeCommitRecord.from_git(c, self.path.name, by_file=True)
-                )
+                revs.extend(FileChangeCommitRecord.from_git(c, self.name, by_file=True))
 
             self._revs = self._db.insert_file_changes(revs)
 
@@ -185,38 +171,35 @@ class RepoAnalyzer:
 
     def _output(
         self,
-        options: AnyCmdOptions,
         output_df: DataFrame,
+        options: AnyCmdOptions,
         plot_df: DataFrame | None = None,
         plot_type: SupportedPlotType | None = None,
         **kwargs,
     ):
-        if locs := options.output_file_paths:
-            writer = Writer(locs)
-            writer.write(output_df)
+        output_options = OutputOptions()
+        for k, v in options.model_dump().items():
+            if hasattr(output_options, k):
+                setattr(output_options, k, v)
 
-        if hasattr(options, "img_location"):
-            if img_loc := options.img_location:
-                assert plot_type is not None
-                plot_df = plot_df if plot_df is not None else output_df
-                plotter = Plotter(img_loc, df=plot_df, plot_type=plot_type, **kwargs)
-                plotter.plot()
+        if output_options.stdout:
+            print(output_df)
 
-    def _check_agg_and_id_options(
-        self,
-        options: DataSelectionOptions,
-    ):
-        if options.aggregate_by.lower() not in [
-            "author",
-            "committer",
-        ] or options.identify_by.lower() not in [
-            "name",
-            "email",
-        ]:
-            msg = """Must aggregate by exactly one of `author` or `committer`,\\
-                    and identify by either `name` or `email`. All other values are errors!
-            """
-            raise ValueError(msg)
+        name = kwargs.get("filename", f"{self.name}-report-{time.time()}")
+
+        if output_options.JSON:
+            json_file = f"{name}.json"
+            output_df.write_json(json_file)
+            logger.info(f"File written to {json_file}")
+        if output_options.csv:
+            csv_file = f"{name}.csv"
+            output_df.write_csv(csv_file)
+            logger.info(f"File written to {csv_file}")
+
+        if output_options.visualize and plot_type is not None:
+            plot_df = plot_df if plot_df is not None else output_df
+            plotter = Plotter(plot_df, output_options, plot_type, **kwargs)
+            plotter.plot()
 
     def summary(self, options: SummaryCmdOptions) -> DataFrame:
         """A simple summary with counts of files, contributors, commits."""
@@ -231,27 +214,25 @@ class RepoAnalyzer:
                 "last_commit": df["authored_datetime"].max(),
             }
         )
-        self._output(options, summary_df)
+        self._output(summary_df, options)
         return summary_df
 
     def revisions(self, options: RevisionsCmdOptions):
         revision_df = self.filtered_revs(options)
-        self._output(options, revision_df)
+        self._output(revision_df, options)
         return revision_df
 
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
-        self._check_agg_and_id_options(options)
         report_df = (
             self.filtered_revs(options)
             .group_by(options.group_by_key)
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
         )
-        self._output(options, report_df)
+        self._output(report_df, options)
         return report_df
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
-        self._check_agg_and_id_options(options)
         report_df = (
             self.filtered_revs(options)
             .group_by("filename")
@@ -264,8 +245,14 @@ class RepoAnalyzer:
         ):
             logger.warning("Invalid sort key for this report, using `filename`...")
             options.sort_by = "filename"
-        self._output(options, report_df)
+        self._output(report_df, options)
         return report_df
+
+    def _blame_with_dt(
+        self, rev: str, dt: datetime, options: BlameCmdOptions, **kwargs
+    ) -> DataFrame:
+        df = self.blame(options, rev, **kwargs)
+        return df.with_columns(datetime=dt)
 
     def blame(
         self,
@@ -278,7 +265,7 @@ class RepoAnalyzer:
 
         rev = self.repo.head.commit.hexsha if rev is None else rev
         files_at_rev = self._file_names_at_rev(rev)
-
+        logger.debug(f"Starting blame for rev: {rev}")
         # git blame for each file.
         # so the number of lines items for each file is the number of lines in the
         # file at the specified revision
@@ -338,59 +325,42 @@ class RepoAnalyzer:
             agg_df = agg_df.top_k(options.limit, by=options.sort_key)
         if not headless:
             self._output(
-                options,
                 agg_df,
+                options,
                 plot_type="blame",
-                title=f"{self.path.name} Blame at {rev[:10] if rev else 'HEAD'}",
+                title=f"{self.name} Blame at {rev[:10] if rev else 'HEAD'}",
                 x=f"{data_field}:Q",
                 y=options.group_by_key,
-                filename=f"{self.path.name}_blame_by_{options.group_by_key}.png",
+                filename=f"{self.name}_blame_by_{options.group_by_key}",
             )
 
         return agg_df
 
     def cumulative_blame(
-        self, options: BlameCmdOptions, batch_size=15, data_field="lines"
+        self, options: BlameCmdOptions, batch_size=2, data_field="lines"
     ) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
         total = DataFrame()
-        rev_batches = itertools.batched(
+        sha_dates = (
             self.filtered_revs(options, ignore_limit=True)
             .sort(cs.temporal())
             .select(pl.col(("sha", "committed_datetime")))
             .unique("sha", keep="first", maintain_order=True)
-            .iter_rows(),
-            n=batch_size,
+            .iter_rows()
         )
-
-        # this has to receive a pickleable object, so list instead of iterable
-        def _get_blame_for_batches(
-            rev_batch: Iterable[tuple[str, datetime]],
-        ) -> DataFrame:
-            results = DataFrame()
-            for rev_sha, dt in itertools.chain(rev_batch):
-                blame_df = self.blame(
-                    options, rev_sha, data_field=data_field, headless=True
-                )
-                _ = blame_df.insert_column(
-                    blame_df.width,
-                    pl.Series(
-                        name="datetime", values=itertools.repeat(dt, blame_df.height)
-                    ),
-                )
-                _ = results.vstack(blame_df, in_place=True)
-            return results
 
         total = DataFrame()
 
-        with parallel_config(n_jobs=-2):
-            blame_frames_batched = Parallel(return_as="generator", verbose=40)(
-                delayed(_get_blame_for_batches)(b) for b in rev_batches
+        with Pool() as p:
+            fn = functools.partial(self._blame_with_dt, options=options, headless=True)
+            blame_frame_results = p.starmap(
+                fn,
+                sha_dates,
             )
 
-        for blame_dfs in blame_frames_batched:
+        for blame_dfs in blame_frame_results:
             _ = total.vstack(blame_dfs, in_place=True)
 
         pivot_df = (
@@ -404,15 +374,15 @@ class RepoAnalyzer:
             .fill_null(0)
         )
         self._output(
-            options,
             pivot_df,
+            options,
             plot_df=total,
             plot_type="cumulative_blame",
             x="datetime:T",
             y=f"sum({data_field}):Q",
             color=f"{options.group_by_key}:N",
-            title=f"{self.path.name} Cumulative Blame",
-            filename=f"{self.path.name}_cumulative_blame_by_{options.group_by_key}.png",
+            title=f"{self.name} Cumulative Blame",
+            filename=f"{self.name}_cumulative_blame_by_{options.group_by_key}",
         )
         return total
 
@@ -425,7 +395,6 @@ class RepoAnalyzer:
         return df
 
     def punchcard(self, options: PunchcardCmdOptions) -> DataFrame:
-        self._check_agg_and_id_options(options)
         df = (
             self.filtered_revs(options)
             .filter(pl.col(options.group_by_key) == options.identifier)
@@ -441,8 +410,8 @@ class RepoAnalyzer:
             {options.identifier: "count", options.punchcard_key: "time"}
         )
         self._output(
-            options,
             df,
+            options,
             plot_df=plot_df,
             plot_type="punchcard",
             x="hours(time):O",
@@ -450,7 +419,7 @@ class RepoAnalyzer:
             color="sum(count):Q",
             size="sum(count):Q",
             title="{options.identifier} Punchcard".title(),
-            filename=f"{self.path.name}_punchcard_{quote(options.identifier)}.png",
+            filename=f"{self.name}_punchcard_{quote(options.identifier)}",
         )
         return df
 
