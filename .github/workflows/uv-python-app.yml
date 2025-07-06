@@ -32,7 +32,7 @@ jobs:
         run: uv sync --locked --all-extras --dev
 
       - name: Run tests
-        run: uv run py.test -m 'not integration'
+        run: uv run py.test -m 'not integration' -s
 
       - name: Install ruff
         uses: astral-sh/ruff-action@v3
