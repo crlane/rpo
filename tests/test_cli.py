@@ -1,4 +1,5 @@
 from pathlib import Path
+from traceback import format_exception
 
 import pytest
 from click.testing import CliRunner
@@ -56,7 +57,7 @@ def test_plottable_subcommands(
         args.append(getattr(actors[-1], identify_by))
     result = runner.invoke(cli, args)
     assert result.exit_code == 0, (
-        f"CLI command failed, Output: {result.output}\nExc: {result.exc_info}"
+        f"CLI command failed, Output: {result.output}\nExc: {format_exception(*result.exc_info)}"
     )
     p = Path("./img")
     assert p.exists(), "Plot path does not exist"

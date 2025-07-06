@@ -1,5 +1,4 @@
 import logging
-import multiprocessing
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
@@ -13,8 +12,6 @@ from .models import FileChangeCommitRecord
 
 logger = logging.getLogger(__name__)
 
-
-lock = multiprocessing.Lock()
 gconnection = duckdb.connect()
 
 
@@ -26,6 +23,7 @@ class DB:
         self._file_path = None
 
         self._created = False
+
         if initialize:
             self.create_tables()
 
@@ -44,23 +42,28 @@ class DB:
     def conn(self) -> duckdb.DuckDBPyConnection:
         global gconnection
         if not self._in_memory and not self._created:
-            gconnection = duckdb.connect(self.file_path).cursor()
+            gconnection = duckdb.connect(self.file_path)
             self._created = True
-        with lock:
-            return gconnection
+        return gconnection
 
     def _execute_many(self, query, data):
-        return self.conn.executemany(query, data)
+        if self._in_memory:
+            return self.conn.executemany(query, data)
+        return self.conn.cursor().executemany(query, data)
 
     def _execute(
         self,
         query,
         params: list[Any] | dict[str, Any] | None = None,
     ) -> DataFrame:
-        return self.conn.execute(query, params).pl()
+        if self._in_memory:
+            return self.conn.execute(query, params).pl()
+        return self.conn.cursor().execute(query, params).pl()
 
     def _execute_sql(self, query):
-        return self.conn.sql(query)
+        if self._in_memory:
+            return self.conn.sql(query)
+        return self.conn.cursor().execute(query)
 
     def create_tables(self):
         _ = self._execute_sql("""
@@ -106,7 +109,8 @@ class DB:
         return group_by
 
     def insert_sha_files(self, data: Iterator[tuple[str, str]]):
-        return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
+        with lock:
+            return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
 
     def sha_file_datetime(self):
         """gets filenames and the date of the commit"""

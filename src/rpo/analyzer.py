@@ -84,7 +84,6 @@ class RepoAnalyzer:
         self._revs = None
 
         self.name = self.options.path.name
-
         self._db = DB(name=self.name, in_memory=in_memory, initialize=True)
 
     @functools.cache
