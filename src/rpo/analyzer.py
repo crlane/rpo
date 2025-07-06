@@ -359,10 +359,7 @@ class RepoAnalyzer:
         logger.info(msg)
         with Pool(processes=max_cpu_count) as p:
             fn = functools.partial(self._blame_with_dt, options=options, headless=True)
-            blame_frame_results = p.starmap(
-                fn,
-                sha_dates,
-            )
+            blame_frame_results = p.starmap(fn, sha_dates, chunksize=10)
 
         for blame_dfs in blame_frame_results:
             _ = total.vstack(blame_dfs, in_place=True)
