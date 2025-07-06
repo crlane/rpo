@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 
 LARGE_THRESHOLD = 10_000
 
-max_cpu_count = 2 if os.getenv("CI") else os.process_cpu_count()
+max_cpu_count = os.process_cpu_count() or 4
+if os.getenv("CI"):
+    max_cpu_count = 1
 
 type AnyCmdOptions = (
     SummaryCmdOptions
@@ -355,6 +357,7 @@ class RepoAnalyzer:
 
         total = DataFrame()
 
+        logger.info(f"Using {max_cpu_count} cpus")
         with Pool(processes=max_cpu_count) as p:
             fn = functools.partial(self._blame_with_dt, options=options, headless=True)
             blame_frame_results = p.starmap(
@@ -367,7 +370,7 @@ class RepoAnalyzer:
 
         pivot_df = (
             total.pivot(
-                [options.group_by_key],
+                options.group_by_key,
                 index="datetime",
                 values=data_field,
                 aggregate_function="sum",
