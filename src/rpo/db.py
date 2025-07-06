@@ -1,20 +1,17 @@
 import logging
 from datetime import datetime
-from multiprocessing import Lock
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 import duckdb
 from polars import DataFrame
 
-from rpo.exceptions import InvalidIdentificationOption
-from rpo.models import FileChangeCommitRecord
+from .exceptions import InvalidIdentificationOption
+from .models import FileChangeCommitRecord
 
 logger = logging.getLogger(__name__)
 
-
-global_lock = Lock()
 gconnection = duckdb.connect()
 
 
@@ -26,6 +23,7 @@ class DB:
         self._file_path = None
 
         self._created = False
+
         if initialize:
             self.create_tables()
 
@@ -44,22 +42,32 @@ class DB:
     def conn(self) -> duckdb.DuckDBPyConnection:
         global gconnection
         if not self._in_memory and not self._created:
-            gconnection = duckdb.connect(self.file_path).cursor()
+            gconnection = duckdb.connect(self.file_path)
             self._created = True
         return gconnection
 
     def _execute_many(self, query, data):
-        return self.conn.executemany(query, data)
+        if self._in_memory:
+            return self.conn.executemany(query, data)
+        with self.conn.cursor() as cur:
+            return cur.executemany(query, data)
 
     def _execute(
         self,
         query,
         params: list[Any] | dict[str, Any] | None = None,
     ) -> DataFrame:
-        return self.conn.execute(query, params).pl()
+        if self._in_memory:
+            return self.conn.execute(query, params).pl()
+        with self.conn.cursor() as cur:
+            return cur.execute(query, params).pl()
 
     def _execute_sql(self, query):
-        return self.conn.sql(query)
+        """Use this only if you do not need the output"""
+        if self._in_memory:
+            return self.conn.sql(query)
+        with self.conn.cursor() as cur:
+            return cur.sql(query)
 
     def create_tables(self):
         _ = self._execute_sql("""
@@ -187,10 +195,15 @@ class DB:
         )
 
     def get_latest_change_tuple(self) -> tuple[datetime, str | None]:
-        res = self._execute_sql(
+        res = self._execute(
             "SELECT authored_datetime, sha FROM file_changes ORDER BY authored_datetime DESC LIMIT 1",
-        ).fetchall()
-        return tuple(*res) or (datetime.min, None)
+        )
+
+        series = res.to_struct()
+        if series is not None and not series.is_empty():
+            # typing for this is weird, it thinks first is a PythonLiteral
+            return tuple(cast(dict, series.first()).values())
+        return (datetime.min, None)
 
     def changes_by_user(self, group_by: str) -> DataFrame:
         group_by = self._check_group_by(group_by)

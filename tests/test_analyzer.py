@@ -1,4 +1,5 @@
-import polars as pl
+from typing import LiteralString
+
 import pytest
 from git import Actor
 from git.repo import Repo
@@ -13,12 +14,6 @@ from rpo.models import (
     RevisionsCmdOptions,
     SummaryCmdOptions,
 )
-from rpo.types import IdentifyBy
-
-
-def test_fail_no_path_no_repo():
-    with pytest.raises(ValueError, match="Must specify either"):
-        _ = RepoAnalyzer()
 
 
 @pytest.mark.parametrize(
@@ -65,9 +60,7 @@ def test_default_branch(
     [("name", 3), ("email", 4)],
     ids=("by-name", "by-email"),
 )
-def test_summary(
-    tmp_repo_analyzer: RepoAnalyzer, identify_by: IdentifyBy, contrib_count: int
-):
+def test_summary(tmp_repo_analyzer: RepoAnalyzer, identify_by: str, contrib_count: int):
     options = SummaryCmdOptions(identify_by=identify_by)
     summary = tmp_repo_analyzer.summary(options)
     assert summary is not None
@@ -93,7 +86,9 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
 
 def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
     contributor_report = tmp_repo_analyzer.contributor_report(
-        ActivityReportCmdOptions(sort_by="author_name", limit=0)
+        ActivityReportCmdOptions(
+            sort_by="user", identify_by="name", aggregate_by="author", limit=0
+        )
     ).to_dict(as_series=False)
     assert list(contributor_report.keys()) == [
         "author_name",
@@ -127,7 +122,7 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
 def test_blame(
     tmp_repo_analyzer: RepoAnalyzer,
     actors: list[Actor],
-    identify_by: IdentifyBy,
+    identify_by: str,
     line_count: int,
 ):
     options = BlameCmdOptions(identify_by=identify_by)
@@ -143,33 +138,43 @@ def test_bus_factor(tmp_repo_analyzer):
 
 
 @pytest.mark.parametrize(
-    "identifier,by,height,count",
+    "identifier,identify_by,aggregate_by,days_committed,count",
     [
         (
             "updated@example.com",
             "email",
-            1,
+            "author",
+            2,
             4,
         ),
-        ("User2 Lastname", "name", 1, 7),
+        ("User2 Lastname", "name", "author", 3, 7),
+        (
+            "updated@example.com",
+            "email",
+            "committer",
+            2,
+            4,
+        ),
+        ("User2 Lastname", "name", "committer", 3, 7),
     ],
 )
 def test_punchcard(
-    tmp_repo_analyzer, identifier: str, by: IdentifyBy, height: int, count: int
+    tmp_repo_analyzer,
+    identifier: str,
+    identify_by: LiteralString,
+    aggregate_by: str,
+    days_committed: int,
+    count: int,
 ):
     df = tmp_repo_analyzer.punchcard(
         PunchcardCmdOptions(
-            identifier=identifier, identify_by=by, aggregate_by="author"
+            identifier=identifier,
+            identify_by=identify_by,
+            aggregate_by=aggregate_by,
         )
     )
-    assert df.height == height
-    # TODO: this is sometimes flaky around minute boundaries
-    df_dict = (
-        # rolling because sometimes commits are in different microseconds, leading to two rows instead of one in the aggregation
-        df.rolling("authored_datetime", period="1h", closed="both")
-        .agg(pl.sum(identifier))
-        .to_dict(as_series=False)
-    )
+    assert df.height == days_committed
+    df_dict = df.to_dict(as_series=False)
     assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
 
 
