@@ -56,6 +56,7 @@ def test_plottable_subcommands(
     ]
     if subcommand == "punchcard":
         args.append(getattr(actors[-1], identify_by))
+    # NOTE: https://github.com/pytest-dev/pytest/issues/11174 things get hung on github actions if this isn't set.
     multiprocessing.set_start_method("spawn", force=True)
 
     result = runner.invoke(cli, args)
