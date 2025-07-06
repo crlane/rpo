@@ -50,7 +50,7 @@ Changelog = "https://github.com/crlane/rpo/blob/master/CHANGELOG.md"
 rpo = 'rpo.main:cli'
 
 [tool.pytest.ini_options]
-addopts = "-v --cov rpo --cov-report=term-missing --cov-config .coveragerc"
+addopts = "-v --cov=rpo --cov-report=term-missing --cov-branch"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as using real git repositories and/or network activity",

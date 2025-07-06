@@ -109,8 +109,7 @@ class DB:
         return group_by
 
     def insert_sha_files(self, data: Iterator[tuple[str, str]]):
-        with lock:
-            return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
+        return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
 
     def sha_file_datetime(self):
         """gets filenames and the date of the commit"""
