@@ -1,3 +1,4 @@
+import multiprocessing
 from pathlib import Path
 from traceback import format_exception
 
@@ -55,6 +56,8 @@ def test_plottable_subcommands(
     ]
     if subcommand == "punchcard":
         args.append(getattr(actors[-1], identify_by))
+    multiprocessing.set_start_method("spawn", force=True)
+
     result = runner.invoke(cli, args)
     assert result.exit_code == 0, (
         f"CLI command failed, Output: {result.output}\nExc: {format_exception(*result.exc_info)}"
