@@ -32,6 +32,7 @@ jobs:
         run: uv sync --locked --all-extras --dev
 
       - name: Run tests
+        timeout-minutes: 2
         run: uv run py.test -m 'not integration' -s
 
       - name: Install ruff
