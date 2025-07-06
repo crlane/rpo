@@ -1,10 +1,9 @@
 import functools
 import logging
-import os
 import time
 from collections.abc import Iterator
 from datetime import datetime
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 LARGE_THRESHOLD = 10_000
 
-max_cpu_count = os.process_cpu_count() or 4
+max_cpu_count = cpu_count() or 4
 
 type AnyCmdOptions = (
     SummaryCmdOptions
@@ -357,9 +356,11 @@ class RepoAnalyzer:
 
         msg = f"Using {max_cpu_count} cpus"
         logger.info(msg)
-        with Pool(processes=max_cpu_count) as p:
+        # Manually set up the pool rather than use a context manager, because
+        # killing the subprocesses breaks coverage
+        with Pool(processes=max_cpu_count, initargs={"daemon": True}) as p:
             fn = functools.partial(self._blame_with_dt, options=options, headless=True)
-            blame_frame_results = p.starmap(fn, sha_dates, chunksize=10)
+            blame_frame_results = p.starmap(fn, sha_dates, chunksize=batch_size)
 
         for blame_dfs in blame_frame_results:
             _ = total.vstack(blame_dfs, in_place=True)

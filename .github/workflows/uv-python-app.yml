@@ -33,7 +33,7 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 2
-        run: uv run py.test -m 'not integration' -s
+        run: uv run py.test -m 'not integration'
 
       - name: Install ruff
         uses: astral-sh/ruff-action@v3

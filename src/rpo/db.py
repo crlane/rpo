@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 import duckdb
 from polars import DataFrame
@@ -49,7 +49,8 @@ class DB:
     def _execute_many(self, query, data):
         if self._in_memory:
             return self.conn.executemany(query, data)
-        return self.conn.cursor().executemany(query, data)
+        with self.conn.cursor() as cur:
+            return cur.executemany(query, data)
 
     def _execute(
         self,
@@ -58,12 +59,15 @@ class DB:
     ) -> DataFrame:
         if self._in_memory:
             return self.conn.execute(query, params).pl()
-        return self.conn.cursor().execute(query, params).pl()
+        with self.conn.cursor() as cur:
+            return cur.execute(query, params).pl()
 
     def _execute_sql(self, query):
+        """Use this only if you do not need the output"""
         if self._in_memory:
             return self.conn.sql(query)
-        return self.conn.cursor().execute(query)
+        with self.conn.cursor() as cur:
+            return cur.sql(query)
 
     def create_tables(self):
         _ = self._execute_sql("""
@@ -191,10 +195,15 @@ class DB:
         )
 
     def get_latest_change_tuple(self) -> tuple[datetime, str | None]:
-        res = self._execute_sql(
+        res = self._execute(
             "SELECT authored_datetime, sha FROM file_changes ORDER BY authored_datetime DESC LIMIT 1",
-        ).fetchall()
-        return tuple(*res) or (datetime.min, None)
+        )
+
+        series = res.to_struct()
+        if series is not None and not series.is_empty():
+            # typing for this is weird, it thinks first is a PythonLiteral
+            return tuple(cast(dict, series.first()).values())
+        return (datetime.min, None)
 
     def changes_by_user(self, group_by: str) -> DataFrame:
         group_by = self._check_group_by(group_by)
