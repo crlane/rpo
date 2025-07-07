@@ -5,10 +5,10 @@ from tempfile import gettempdir
 from typing import Any, Iterator, cast
 
 import duckdb
+import polars as pl
 from polars import DataFrame
 
 from .exceptions import InvalidIdentificationOption
-from .models import FileChangeCommitRecord
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +74,14 @@ class DB:
                 CREATE OR REPLACE TABLE file_changes (
                     repository VARCHAR,
                     sha VARCHAR(40),
+                    authored_datetime DATETIME,
                     author_name VARCHAR,
                     author_email VARCHAR,
+                    committed_datetime DATETIME,
                     committer_name VARCHAR,
                     committer_email VARCHAR,
                     gpgsig VARCHAR,
 
-                    authored_datetime DATETIME,
-                    committed_datetime DATETIME,
                     filename VARCHAR,
                     insertions UBIGINT,
                     deletions UBIGINT,
@@ -89,13 +89,20 @@ class DB:
                     change_type VARCHAR(1),
                     is_binary BOOLEAN)
                  """)
-
         _ = self._execute_sql("""CREATE OR REPLACE TABLE sha_files (
                 sha VARCHAR(40),
                 filename VARCHAR
                 )
                 """)
 
+        _ = self._execute_sql("""
+                CREATE OR REPLACE TABLE objects (
+                    oid VARCHAR(40),
+                    type VARCHAR,
+                    path VARCHAR,
+                    deltabase VARCHAR(40)
+                    )
+                 """)
         logger.info("Created tables")
 
     def _check_group_by(self, group_by: str) -> str:
@@ -115,6 +122,10 @@ class DB:
     def insert_sha_files(self, data: Iterator[tuple[str, str]]):
         return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
 
+    def insert_objects(self, df: DataFrame):
+        my_df = df
+        _ = self.conn.sql("INSERT INTO objects SELECT * FROM df")
+
     def sha_file_datetime(self):
         """gets filenames and the date of the commit"""
         return self._execute(
@@ -132,45 +143,14 @@ class DB:
             [author],
         )
 
-    def insert_file_changes(self, revs: list[FileChangeCommitRecord]):
-        to_insert = [
-            r.model_dump(
-                exclude=set(
-                    [
-                        "summary",
-                    ]
-                )
-            )
-            for r in revs
-        ]
-        query = """INSERT into file_changes VALUES (
-                    $repository,
-                    $sha,
-                    $author_name,
-                    $author_email,
-                    $committer_name,
-                    $committer_email,
-                    $gpgsig,
-                    $authored_datetime,
-                    $committed_datetime,
-                    $filename,
-                    $insertions,
-                    $deletions,
-                    $lines,
-                    $change_type,
-                    $is_binary
-                )"""
-        try:
-            if to_insert:
-                _ = self._execute_many(query, to_insert)
-            return self.all_file_changes()
-        except (duckdb.InvalidInputException, duckdb.ConversionException) as e:
-            logger.error(f"Failure to insert file change records: {e}")
+    def insert_file_changes(self, revs: DataFrame):
+        my_df = revs.select(pl.exclude("summary"))
+        _ = self.conn.sql("INSERT INTO file_changes SELECT * FROM my_df")
         logger.info(f"Inserted {len(revs)} file change records into {self.file_path}")
 
     def change_count(self) -> int:
         return self._execute(
-            "select count(distinct sha) as commit_count from file_changes",
+            "SELECT count(distinct sha) AS commit_count FROM file_changes",
         )["commit_count"][0]
 
     def commits_per_file(self) -> DataFrame:

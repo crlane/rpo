@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Iterator
 from datetime import datetime
+from itertools import chain
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from polars import DataFrame
 from .db import DB
 from .models import (
     ActivityReportCmdOptions,
+    BatchCheckRecord,
     BlameCmdOptions,
     BusFactorCmdOptions,
     FileChangeCommitRecord,
@@ -84,6 +86,37 @@ class RepoAnalyzer:
 
         self.name = self.options.path.name
         self._db = DB(name=self.name, in_memory=in_memory, initialize=True)
+        self._analyze()
+
+    def _analyze(self):
+        p = self.repo.git.rev_list("--all", "--objects", as_process=True)
+        result = self.repo.git.cat_file(
+            "--batch-check=\"%(objectname) %(objecttype) '%(rest)' %(deltabase)\"",
+            istream=p.stdout.name,
+        )
+        df = DataFrame(
+            BatchCheckRecord.from_raw(a.strip('"')) for a in result.split("\n")
+        )
+        self._objects = df
+
+        self._db.insert_objects(df)
+
+        _, sha = self._db.get_latest_change_tuple()
+        rev_spec = (
+            self.repo.head.commit.hexsha
+            if sha is None
+            else f"{sha}...{self.repo.head.commit.hexsha}"
+        )
+
+        generator = chain.from_iterable(
+            FileChangeCommitRecord.from_git(c, self.name, by_file=True)
+            for c in self.repo.iter_commits(
+                rev_spec, no_merges=self.options.ignore_merges
+            )
+        )
+        self._revs = DataFrame(generator)
+
+        self._db.insert_file_changes(self._revs)
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
@@ -100,21 +133,8 @@ class RepoAnalyzer:
     @property
     def revs(self):
         """The git revisions property."""
-        _, sha = self._db.get_latest_change_tuple()
         if self._revs is None:
-            revs: list[FileChangeCommitRecord] = []
-            rev_spec = (
-                self.repo.head.commit.hexsha
-                if sha is None
-                else f"{sha}...{self.repo.head.commit.hexsha}"
-            )
-            for c in self.repo.iter_commits(
-                rev_spec, no_merges=self.options.ignore_merges
-            ):
-                revs.extend(FileChangeCommitRecord.from_git(c, self.name, by_file=True))
-
-            self._revs = self._db.insert_file_changes(revs)
-
+            self._analyze()
         assert self._revs is not None
         count = self._revs.unique("sha").height
 

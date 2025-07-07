@@ -3,12 +3,14 @@ from copy import deepcopy
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import polars as pl
 import polars.selectors as cs
 from git import Commit as GitCommit
 from pydantic import BaseModel, Field
+
+GIT_OID_LENGTH = 40
 
 
 class FileSaveOptions(BaseModel):
@@ -196,9 +198,43 @@ def recursive_getattr(
         return recursive_getattr(getattr(obj, head), tail)
 
 
+type OID = str
+
+
+class BatchCheckRecord(BaseModel):
+    oid: OID = Field(min_length=GIT_OID_LENGTH, max_length=GIT_OID_LENGTH)
+    type: Literal["tree", "blob", "commit"] = Field(
+        description="type of the object as defined by git"
+    )
+    path: str = Field(
+        description="The path on disk. Empty except for blob types", default=""
+    )
+    deltabase: OID = Field(
+        min_length=GIT_OID_LENGTH,
+        max_length=GIT_OID_LENGTH,
+        default="0" * GIT_OID_LENGTH,
+    )
+
+    @classmethod
+    def from_raw(cls, batch_line: str) -> Self:
+        fields = {
+            "oid": batch_line[:GIT_OID_LENGTH],
+            "deltabase": batch_line[-GIT_OID_LENGTH:],
+        }
+        rest = batch_line[GIT_OID_LENGTH + 1 : -GIT_OID_LENGTH - 1]
+        for i, c in enumerate(rest):
+            if c.isspace():
+                fields["type"] = rest[:i]
+                fields["path"] = rest[i + 2 : len(rest) - 1]
+                break
+        else:
+            raise ValueError("Parsing of cat-file batch output failed!")
+        return cls(**fields)
+
+
 class FileChangeCommitRecord(BaseModel):
     repository: str
-    sha: str
+    sha: OID = Field(min_length=GIT_OID_LENGTH, max_length=GIT_OID_LENGTH)
     authored_datetime: datetime
     author_name: str
     author_email: str | None
