@@ -75,7 +75,7 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
         ActivityReportCmdOptions(aggregate_by="author", sort_by="numeric")
     ).to_dict(as_series=False)
     assert list(file_report.keys()) == [
-        "filename",
+        "path",
         "lines",
         "insertions",
         "deletions",

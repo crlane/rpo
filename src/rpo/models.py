@@ -1,13 +1,11 @@
 from collections.abc import Iterable
-from copy import deepcopy
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
 import polars as pl
 import polars.selectors as cs
-from git import Commit as GitCommit
 from pydantic import BaseModel, Field
 
 GIT_OID_LENGTH = 40
@@ -43,7 +41,7 @@ class DataSelectionOptions(BaseModel):
         description="How to identify the user responsible for commits",
         default="name",
     )
-    sort_by: Literal["user", "numeric", "temporal"] = Field(
+    sort_by: Literal["user", "numeric", "temporal", "path"] = Field(
         description="The field to sort on in the resulting DataFrame",
         default="user",
     )
@@ -180,30 +178,12 @@ class GitOptions(BaseModel):
     )
 
 
-def recursive_getattr(
-    obj: object, field: str, separator: str = ".", should_call: bool = True
-) -> Any:
-    if not field:
-        return obj
-    try:
-        o = getattr(obj, field)
-        if callable(o) and should_call:
-            return o()
-        else:
-            if field.endswith("email"):
-                o = str(o).lower()
-            return o
-    except AttributeError:
-        head, _, tail = field.partition(separator)
-        return recursive_getattr(getattr(obj, head), tail)
-
-
 type OID = str
 
 
 class BatchCheckRecord(BaseModel):
     oid: OID = Field(min_length=GIT_OID_LENGTH, max_length=GIT_OID_LENGTH)
-    type: Literal["tree", "blob", "commit"] = Field(
+    type: Literal["tree", "blob", "commit", "tag"] = Field(
         description="type of the object as defined by git"
     )
     path: str = Field(
@@ -242,39 +222,10 @@ class FileChangeCommitRecord(BaseModel):
     committer_name: str
     committer_email: str | None
 
-    summary: str
-    gpgsig: str | None = None
     # file change info
-    filename: str | None = None
+    path: str | None = None
     insertions: float | None = None
     deletions: float | None = None
     lines: float | None = None
-    change_type: Literal["M", "A", "D"] | None = None
+    # change_type: Literal["M", "A", "D"] | None = None
     is_binary: bool | None = None
-
-    @classmethod
-    def from_git(cls, git_commit: GitCommit, for_repo: str, by_file: bool = False):
-        fields = {
-            "hexsha": "sha",
-            "authored_datetime": "authored_datetime",
-            "author.name": "author_name",
-            "author.email": "author_email",
-            "committed_datetime": "committed_datetime",
-            "committer.name": "committer_name",
-            "committer.email": "committer_email",
-            "summary": "summary",
-            "gpgsig": "gpgsig",
-        }
-        base = {v: recursive_getattr(git_commit, f) for f, v in fields.items()}
-        base["repository"] = for_repo
-        if by_file:
-            data = deepcopy(base)
-            for f, changes in git_commit.stats.files.items():
-                data["filename"] = f
-                # if all the line change statistics are 0, it's a binary file
-                lines_changed = sum(
-                    changes.get(t, 0) for t in ("insertions", "deletions", "lines")
-                )
-                data["is_binary"] = not lines_changed
-                data.update(**changes)
-                yield cls(**data)

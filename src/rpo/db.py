@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Any, Iterator, cast
+from typing import Any, cast
 
 import duckdb
 import polars as pl
@@ -72,28 +72,20 @@ class DB:
     def create_tables(self):
         _ = self._execute_sql("""
                 CREATE OR REPLACE TABLE file_changes (
-                    repository VARCHAR,
                     sha VARCHAR(40),
-                    authored_datetime DATETIME,
-                    author_name VARCHAR,
-                    author_email VARCHAR,
-                    committed_datetime DATETIME,
                     committer_name VARCHAR,
                     committer_email VARCHAR,
-                    gpgsig VARCHAR,
-
-                    filename VARCHAR,
+                    committed_datetime DATETIME,
+                    author_name VARCHAR,
+                    author_email VARCHAR,
+                    authored_datetime DATETIME,
+                    tree_oid VARCHAR,
+                    path VARCHAR,
                     insertions UBIGINT,
                     deletions UBIGINT,
                     lines UBIGINT,
-                    change_type VARCHAR(1),
                     is_binary BOOLEAN)
                  """)
-        _ = self._execute_sql("""CREATE OR REPLACE TABLE sha_files (
-                sha VARCHAR(40),
-                filename VARCHAR
-                )
-                """)
 
         _ = self._execute_sql("""
                 CREATE OR REPLACE TABLE objects (
@@ -119,18 +111,9 @@ class DB:
             return default
         return group_by
 
-    def insert_sha_files(self, data: Iterator[tuple[str, str]]):
-        return self._execute_many("""INSERT INTO sha_files VALUES ($1, $2)""", data)
-
     def insert_objects(self, df: DataFrame):
         my_df = df
         _ = self.conn.sql("INSERT INTO objects SELECT * FROM df")
-
-    def sha_file_datetime(self):
-        """gets filenames and the date of the commit"""
-        return self._execute(
-            "SELECT committed_datetime, sf.sha, sf.filename FROM file_changes fc JOIN sha_files sf ON fc.sha = sf.sha",
-        ).sort(by="filename")
 
     def author_file_change_report(self, author: str, by: str = "email"):
         if by not in {"email", "name"}:

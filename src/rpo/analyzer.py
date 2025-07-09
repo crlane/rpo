@@ -3,7 +3,6 @@ import logging
 import time
 from collections.abc import Iterator
 from datetime import datetime
-from itertools import chain
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from urllib.parse import quote
 
 import polars as pl
 import polars.selectors as cs
+from dateutil.parser import parse as dateparse
 from git import Actor
 from git.repo import Repo
 from git.repo.base import BlameEntry
@@ -23,7 +23,7 @@ from .models import (
     BatchCheckRecord,
     BlameCmdOptions,
     BusFactorCmdOptions,
-    FileChangeCommitRecord,
+    FileSaveOptions,
     GitOptions,
     OutputOptions,
     PunchcardCmdOptions,
@@ -83,46 +83,34 @@ class RepoAnalyzer:
         self._commit_count = None
 
         self._revs = None
+        self._objects = None
 
         self.name = self.options.path.name
         self._db = DB(name=self.name, in_memory=in_memory, initialize=True)
-        self._analyze()
 
-    def _analyze(self):
-        p = self.repo.git.rev_list("--all", "--objects", as_process=True)
-        result = self.repo.git.cat_file(
-            "--batch-check=\"%(objectname) %(objecttype) '%(rest)' %(deltabase)\"",
-            istream=p.stdout.name,
-        )
-        df = DataFrame(
-            BatchCheckRecord.from_raw(a.strip('"')) for a in result.split("\n")
-        )
-        self._objects = df
-
-        self._db.insert_objects(df)
-
-        _, sha = self._db.get_latest_change_tuple()
-        rev_spec = (
-            self.repo.head.commit.hexsha
-            if sha is None
-            else f"{sha}...{self.repo.head.commit.hexsha}"
-        )
-
-        generator = chain.from_iterable(
-            FileChangeCommitRecord.from_git(c, self.name, by_file=True)
-            for c in self.repo.iter_commits(
-                rev_spec, no_merges=self.options.ignore_merges
+    @property
+    def objects(self) -> DataFrame:
+        if self._objects is None:
+            p = self.repo.git.rev_list(
+                "--all", "--objects", "--no-merges", as_process=True
             )
-        )
-        self._revs = DataFrame(generator)
+            result = self.repo.git.cat_file(
+                "--batch-check=\"%(objectname) %(objecttype) '%(rest)' %(deltabase)\"",
+                istream=p.stdout.name,
+            )
+            df = DataFrame(
+                BatchCheckRecord.from_raw(a.strip('"')) for a in result.split("\n")
+            )
+            self._objects = df
 
-        self._db.insert_file_changes(self._revs)
+            self._db.insert_objects(df)
+        return self._objects
 
     @functools.cache
     def _file_names_at_rev(self, rev: str) -> pl.Series:
         raw = self.repo.git.ls_tree("-r", "--name-only", rev)
         vals = raw.strip().split("\n")
-        return pl.Series(name="filename", values=vals)
+        return pl.Series(name="path", values=vals)
 
     @property
     def commit_count(self):
@@ -134,29 +122,87 @@ class RepoAnalyzer:
     def revs(self):
         """The git revisions property."""
         if self._revs is None:
-            self._analyze()
-        assert self._revs is not None
-        count = self._revs.unique("sha").height
-
-        assert count == self._db.change_count(), (
-            "Mismatch of database and dataframe sha counts"
-        )
-        if count != self.commit_count:
-            logger.warning(
-                f"Excluding {self.commit_count - count} commits due to settings"
+            _, sha = self._db.get_latest_change_tuple()
+            rev_spec = (
+                self.repo.head.commit.hexsha
+                if sha is None
+                else f"{sha}...{self.repo.head.commit.hexsha}"
             )
+
+            # git rev-list --all --format="%H,%cN,%cE,%cI,%aN,%aE,%aI,%T"
+            # git log --format=%H,%aN,%aE,%aI,%cN,%cE,%cI --find-renames --numstat
+            GITLOG_FORMAT = "%H|'%cN'|%cE|%cI|'%aN'|%aE|%aI|%T"
+            result = self.repo.git.log(
+                rev_spec,
+                numstat=True,
+                find_renames=True,
+                no_merges=self.options.ignore_merges,
+                w=self.options.ignore_whitespace,
+                format=GITLOG_FORMAT,
+            ).split("\n")
+
+            self._revs = DataFrame()
+            base: dict[str, str | int | datetime] = {}
+            keys = (
+                "sha",
+                "committer_name",
+                "committer_email",
+                "committed_datetime",
+                "author_name",
+                "author_email",
+                "authored_datetime",
+                "tree_oid",
+            )
+            for line in result:
+                if not line:
+                    continue
+                vals = []
+                vals = [w.strip("'") for w in line.split("|")]
+                if len(keys) == len(vals):  # file list
+                    prev = base
+                    base = {}
+                    for i, k in enumerate(keys):
+                        if k.endswith("datetime"):
+                            base[k] = dateparse(vals[i])
+                        else:
+                            base[k] = vals[i]
+
+                    if prev:
+                        try:
+                            _ = self._revs.vstack(DataFrame(prev), in_place=True)
+                        except pl.ShapeError:
+                            logger.warning(
+                                f"Found two commit header lines in a row, likely a merge commit: {prev['sha']}"
+                            )
+                else:
+                    insertions, deletions, path = line.split("\t")
+                    base["path"] = path
+                    base["insertions"] = int(insertions) if insertions.isdigit() else 0
+                    base["deletions"] = int(deletions) if deletions.isdigit() else 0
+                    base["lines"] = base["insertions"] + base["deletions"]
+                    base["is_binary"] = base["lines"] == 0
+
+            _ = self._revs.vstack(DataFrame(base), in_place=True).rechunk()
+            assert self._revs is not None and not self._revs.is_empty()
+            self._db.insert_file_changes(self._revs)
+            count = self._revs.unique("sha").height
+
+            assert count == self._db.change_count(), (
+                "Mismatch of database and dataframe sha counts"
+            )
+            if count != self.commit_count:
+                logger.warning(
+                    f"Excluding {self.commit_count - count} commits due to settings"
+                )
         return self._revs
 
     def filtered_revs(self, options: AnyCmdOptions, ignore_limit=False):
-        df = (
-            self.revs.with_columns(
-                pl.col(options.group_by_key).replace(options.aliases)
-            )
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-            .filter(
-                options.glob_filter_expr(
-                    self.revs["filename"],
-                )
+        df = self.revs.with_columns(
+            pl.col(options.group_by_key).replace(options.aliases)
+        ).filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
+        df = df.filter(
+            options.glob_filter_expr(
+                df["path"],
             )
         )
         if not ignore_limit:
@@ -183,12 +229,15 @@ class RepoAnalyzer:
     def is_large(self):
         return self.commit_count > LARGE_THRESHOLD
 
-    def analyze(self):
+    def analyze(self, options: FileSaveOptions):
         """Perform initial analysis"""
         if self.is_large:
             logger.warning(
                 "Large repo with {self.commit_count} revisions, analysis will take a while"
             )
+        df = self.objects.sort(by="path")
+        self._output(df, options)
+        return df
 
     def _output(
         self,
@@ -227,8 +276,7 @@ class RepoAnalyzer:
         df = self.filtered_revs(options)
         summary_df = DataFrame(
             {
-                "name": df["repository"].unique(),
-                "files": df["filename"].unique().count(),
+                "files": df["path"].unique().count(),
                 "contributors": df[options.group_by_key].unique().count(),
                 "commits": df["sha"].unique().count(),
                 "first_commit": df["authored_datetime"].min(),
@@ -256,7 +304,7 @@ class RepoAnalyzer:
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
         report_df = (
             self.filtered_revs(options)
-            .group_by("filename")
+            .group_by("path")
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
         )
@@ -264,8 +312,8 @@ class RepoAnalyzer:
             isinstance(options.sort_key, str)
             and options.sort_key not in report_df.columns
         ):
-            logger.warning("Invalid sort key for this report, using `filename`...")
-            options.sort_by = "filename"
+            logger.warning("Invalid sort key for this report, using `path`...")
+            options.sort_by = "path"
         self._output(report_df, options)
         return report_df
 
@@ -273,7 +321,9 @@ class RepoAnalyzer:
         self, rev: str, dt: datetime, options: BlameCmdOptions, **kwargs
     ) -> DataFrame:
         df = self.blame(options, rev, **kwargs)
-        return df.with_columns(datetime=dt)
+        s = pl.Series("datetime", [dt] * df.height, dtype=pl.Datetime)
+        df = df.hstack([s])
+        return df
 
     def blame(
         self,
@@ -313,7 +363,7 @@ class RepoAnalyzer:
                 data.append(
                     {
                         "point_in_time": rev,
-                        "filename": f,
+                        "path": f,
                         "sha": commit.hexsha,
                         "line_range": blame_entry.linenos,
                         "author_name": author.name,
@@ -335,7 +385,6 @@ class RepoAnalyzer:
         )
 
         agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(data_field))
-
         if not options.limit or options.limit <= 0:
             agg_df = agg_df.sort(
                 by=options.sort_key, descending=options.sort_descending
@@ -364,14 +413,17 @@ class RepoAnalyzer:
         an actor at that point in time.
         """
         total = DataFrame()
+        if options.aggregate_by == "author":
+            field = "authored_datetime"
+        else:
+            field = "committed_datetime"
         sha_dates = (
             self.filtered_revs(options, ignore_limit=True)
             .sort(cs.temporal())
-            .select(pl.col(("sha", "committed_datetime")))
+            .select(pl.col(("sha", field)))
             .unique("sha", keep="first", maintain_order=True)
             .iter_rows()
         )
-
         total = DataFrame()
 
         msg = f"Using {max_cpu_count} cpus"

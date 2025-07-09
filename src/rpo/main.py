@@ -81,14 +81,18 @@ def cli(
         else:
             logger.warning("No config file found, using defaults and/or cmd line flags")
 
+    ctx.obj["config"] = {}
+
     if config_file:
         with open(config_file, "r") as f:
             config = json.load(f)
-        for k, new in config.items():
-            if k in options:
-                old = getattr(options, k)
-                setattr(options, k, new)
-                logger.info(f"Config file overidden option {k}: {old}->{new}")
+            for k, v in options.model_dump().items():
+                if not getattr(options, k) == v:
+                    setattr(options, k, config.get(k, v))
+                    logger.warning(
+                        f"Overriding option with config file: {k}: {v} -> {getattr(options, k)}"
+                    )
+
         ctx.obj["config"] = config
 
     ctx.obj["analyzer"] = RepoAnalyzer(
@@ -106,6 +110,11 @@ def summary(
 ):
     """Generate very high level summary for the repository"""
     ra = ctx.obj.get("analyzer")
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
+
     _ = ra.summary(
         SummaryCmdOptions(**data_options.model_dump(), **file_output.model_dump())
     )
@@ -120,6 +129,10 @@ def revisions(
 ):
     """List all revisions in the repository"""
     ra = ctx.obj.get("analyzer")
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
     _ = ra.revisions(
         RevisionsCmdOptions(**data_options.model_dump(), **file_output.model_dump())
     )
@@ -144,6 +157,10 @@ def activity_report(
     """Produces file or author report of activity at a particular git revision"""
     ra = ctx.obj.get("analyzer")
 
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
     options = ActivityReportCmdOptions(
         **file_output.model_dump(), **data_options.model_dump()
     )  #
@@ -168,6 +185,10 @@ def blame(
 ):
     """Computes the per user blame for all files at a given revision"""
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
     options = BlameCmdOptions(
         **file_output.model_dump(), **data_options.model_dump()
     )  #
@@ -188,6 +209,10 @@ def cumulative_blame(
     calculate the blame information.
     """
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
     options = BlameCmdOptions(
         **file_output.model_dump(), **data_options.model_dump()
     )  #
@@ -207,7 +232,25 @@ def punchcard(
 ):
     """Computes commits for a given user by datetime"""
     ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    for k, v in data_options.model_dump().items():
+        setattr(data_options, k, ctx.obj["config"].get(k, v))
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
     options = PunchcardCmdOptions(
         identifier=identifier, **file_output.model_dump(), **data_options.model_dump()
     )  #
     _ = ra.punchcard(options)
+
+
+@cli.command()
+@file_options
+@click.pass_context
+def analyze(
+    ctx: click.Context,
+    file_output: FileSaveOptions,
+):
+    """Computes commits for a given user by datetime"""
+    ra: RepoAnalyzer = ctx.obj.get("analyzer")
+    for k, v in file_output.model_dump().items():
+        setattr(file_output, k, ctx.obj["config"].get(k, v))
+    _ = ra.analyze(file_output)
