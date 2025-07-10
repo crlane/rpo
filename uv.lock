@@ -917,6 +917,7 @@ dependencies = [
     { name = "polars", extra = ["pyarrow"] },
     { name = "pydanclick" },
     { name = "pydantic" },
+    { name = "python-dateutil" },
 ]
 
 [package.dev-dependencies]
@@ -941,6 +942,7 @@ requires-dist = [
     { name = "polars", extras = ["pyarrow"], specifier = ">=1.30.0" },
     { name = "pydanclick", specifier = ">=0.5.1" },
     { name = "pydantic", specifier = ">=2.11.5" },
+    { name = "python-dateutil", specifier = ">=2.9.0.post0" },
 ]
 
 [package.metadata.requires-dev]

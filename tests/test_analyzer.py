@@ -127,7 +127,9 @@ def test_blame(
 ):
     options = BlameCmdOptions(identify_by=identify_by)
     blame_report = tmp_repo_analyzer.blame(options).to_dict(as_series=False)
-    flattened = dict(zip(blame_report[f"author_{identify_by}"], blame_report["lines"]))
+    flattened = dict(
+        zip(blame_report[f"author_{identify_by}"], blame_report["num_lines"])
+    )
     actor = actors[-1]
     assert flattened[getattr(actor, identify_by)] == line_count
 

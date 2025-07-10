@@ -192,8 +192,7 @@ def blame(
     options = BlameCmdOptions(
         **file_output.model_dump(), **data_options.model_dump()
     )  #
-    data_key = "lines"
-    _ = ra.blame(options, rev=revision, data_field=data_key)
+    _ = ra.blame(options, rev=revision)
 
 
 #

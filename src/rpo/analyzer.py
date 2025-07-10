@@ -1,21 +1,19 @@
 import functools
+import itertools
 import logging
 import time
-from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timezone
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Any
 from urllib.parse import quote
 
 import polars as pl
 import polars.selectors as cs
 from dateutil.parser import parse as dateparse
-from git import Actor
 from git.repo import Repo
-from git.repo.base import BlameEntry
-from git.types import Commit_ish
 from polars import DataFrame
+
+from rpo.git_parser import GitParser
 
 from .db import DB
 from .models import (
@@ -23,6 +21,7 @@ from .models import (
     BatchCheckRecord,
     BlameCmdOptions,
     BusFactorCmdOptions,
+    DataSelectionOptions,
     FileSaveOptions,
     GitOptions,
     OutputOptions,
@@ -106,11 +105,16 @@ class RepoAnalyzer:
             self._db.insert_objects(df)
         return self._objects
 
-    @functools.cache
-    def _file_names_at_rev(self, rev: str) -> pl.Series:
-        raw = self.repo.git.ls_tree("-r", "--name-only", rev)
-        vals = raw.strip().split("\n")
-        return pl.Series(name="path", values=vals)
+    def _file_names_at_rev(self, rev: str, options: DataSelectionOptions) -> DataFrame:
+        raw = self.repo.git.ls_tree("-r", "--format=%(objectname) %(path)", rev)
+        vals = [
+            dict(zip(("blob_id", "path"), a.split(maxsplit=1)))
+            for a in raw.strip().split("\n")
+        ]
+        # TODO: make sure this uses filter. Also, how can we
+        # Make sure anything that needs to filter filters
+        df = DataFrame(vals)
+        return df.filter(options.glob_filter_expr(df["path"]))
 
     @property
     def commit_count(self):
@@ -156,14 +160,20 @@ class RepoAnalyzer:
             for line in result:
                 if not line:
                     continue
-                vals = []
                 vals = [w.strip("'") for w in line.split("|")]
                 if len(keys) == len(vals):  # file list
                     prev = base
                     base = {}
                     for i, k in enumerate(keys):
                         if k.endswith("datetime"):
-                            base[k] = dateparse(vals[i])
+                            dt = dateparse(vals[i])
+                            try:
+                                assert dt.utcoffset() is not None
+                            except (ValueError, AssertionError):
+                                # sometimes, there are weird offsets, default to UTC
+                                dt = dt.replace(tzinfo=timezone.utc)
+                                # some of the offsets don't work
+                            base[k] = dt
                         else:
                             base[k] = vals[i]
 
@@ -171,9 +181,11 @@ class RepoAnalyzer:
                         try:
                             _ = self._revs.vstack(DataFrame(prev), in_place=True)
                         except pl.ShapeError:
-                            logger.warning(
+                            logger.debug(
                                 f"Found two commit header lines in a row, likely a merge commit: {prev['sha']}"
                             )
+                        except Exception as e:
+                            logger.exception(f"Unknown error occurred: {e}")
                 else:
                     insertions, deletions, path = line.split("\t")
                     base["path"] = path
@@ -292,16 +304,21 @@ class RepoAnalyzer:
         return revision_df
 
     def contributor_report(self, options: ActivityReportCmdOptions) -> DataFrame:
+        # lines changed
         report_df = (
             self.filtered_revs(options)
             .group_by(options.group_by_key)
             .agg(pl.sum("lines"), pl.sum("insertions"), pl.sum("deletions"))
             .with_columns((pl.col("insertions") - pl.col("deletions")).alias("net"))
-        )
+        ).sort(by="lines")
+
+        # commits created
+        # self.filtered_revs(options).group_by(options.group_by_key).agg(pl.len().alias('commit_count')).sort(by='commit_count').sum()
         self._output(report_df, options)
         return report_df
 
     def file_report(self, options: ActivityReportCmdOptions) -> DataFrame:
+        # changes per file
         report_df = (
             self.filtered_revs(options)
             .group_by("path")
@@ -314,77 +331,65 @@ class RepoAnalyzer:
         ):
             logger.warning("Invalid sort key for this report, using `path`...")
             options.sort_by = "path"
+
+        # commits per file
+        # self.filtered_revs(options).group_by('path').agg(pl.len().alias('commits')).sort(by='commits')
         self._output(report_df, options)
         return report_df
-
-    def _blame_with_dt(
-        self, rev: str, dt: datetime, options: BlameCmdOptions, **kwargs
-    ) -> DataFrame:
-        df = self.blame(options, rev, **kwargs)
-        s = pl.Series("datetime", [dt] * df.height, dtype=pl.Datetime)
-        df = df.hstack([s])
-        return df
 
     def blame(
         self,
         options: BlameCmdOptions,
         rev: str | None = None,
-        data_field="lines",
+        data_field="num_lines",
         headless=False,
     ) -> DataFrame:
-        """For a given revision, lists the number of total lines contributed by the aggregating entity"""
+        """For a given revision, lists the number of total lines contributed by the aggregating entity
+
+        To check this, you can use the git command to show the number of commits
+
+        ```
+        git blame --line-porcelain file |
+           sed -n 's/^author //p' |
+           sort | uniq -c | sort -rn
+        ```
+        """
 
         rev = self.repo.head.commit.hexsha if rev is None else rev
-        files_at_rev = self._file_names_at_rev(rev)
+        files_at_rev = self._file_names_at_rev(rev, options)
         logger.debug(f"Starting blame for rev: {rev}")
-        # git blame for each file.
-        # so the number of lines items for each file is the number of lines in the
-        # file at the specified revision
-        # BlameEntry
-        blame_map: dict[str, Iterator[BlameEntry]] = {
-            f: self.repo.blame_incremental(
-                rev,
-                f,
-                w=self.options.ignore_whitespace,
-                no_merges=self.options.ignore_merges,
-            )
-            for f in files_at_rev.filter(
-                options.glob_filter_expr(
-                    files_at_rev,
-                )
-            )
-        }
-        data: list[dict[str, Any]] = []
-        for f, blame_entries in blame_map.items():
-            for blame_entry in blame_entries:
-                commit: Commit_ish = blame_entry.commit
-                author: Actor = commit.author
-                committer: Actor = commit.committer
-                data.append(
-                    {
-                        "point_in_time": rev,
-                        "path": f,
-                        "sha": commit.hexsha,
-                        "line_range": blame_entry.linenos,
-                        "author_name": author.name,
-                        "author_email": author.email.lower() if author.email else "",
-                        "committer_name": committer.name,
-                        "committer_email": committer.email.lower()
-                        if committer.email
-                        else "",
-                        "committed_datetime": commit.committed_datetime,
-                        "authored_datetime": commit.authored_datetime,
-                    }
-                )
 
-        blame_df = (
-            DataFrame(data)
-            .with_columns(pl.col(options.group_by_key).replace(options.aliases))
-            .filter(pl.col(options.group_by_key).is_in(options.exclude_users).not_())
-            .with_columns(pl.col("line_range").list.len().alias(data_field))
+        gp = GitParser()
+        inc_blame_result = itertools.chain.from_iterable(
+            itertools.chain.from_iterable(
+                gp.parse_blame_result(r, f[0], f[1])
+                for r in self.repo.git.blame(rev, "--incremental", "--", f[1]).split(
+                    "\n"
+                )
+            )
+            for f in files_at_rev.iter_rows()
         )
 
-        agg_df = blame_df.group_by(options.group_by_key).agg(pl.sum(data_field))
+        blame_df = DataFrame((dict(at_rev=rev, **d) for d in inc_blame_result))
+
+        revs_df = self.filtered_revs(options)
+        joined_df = pl.sql(
+            "SELECT * from blame_df bdf JOIN revs_df rdf on bdf.commit_sha = rdf.sha"
+        ).collect()
+        # git blame for each file.
+
+        # NOTE: this is being used in a cumulative fashion, return before aggregating
+        if headless:
+            return joined_df
+
+        # this turns into blame output, before is raw balme that j
+        agg_df = joined_df.pivot(
+            on=["at_rev"],
+            index=[options.group_by_key],
+            values=[data_field],
+            aggregate_function="sum",
+        ).rename({rev: data_field})
+
         if not options.limit or options.limit <= 0:
             agg_df = agg_df.sort(
                 by=options.sort_key, descending=options.sort_descending
@@ -393,35 +398,31 @@ class RepoAnalyzer:
             agg_df = agg_df.bottom_k(options.limit, by=options.sort_key)
         else:
             agg_df = agg_df.top_k(options.limit, by=options.sort_key)
-        if not headless:
-            self._output(
-                agg_df,
-                options,
-                plot_type="blame",
-                title=f"{self.name} Blame at {rev[:10] if rev else 'HEAD'}",
-                x=f"{data_field}:Q",
-                y=options.group_by_key,
-                filename=f"{self.name}_blame_by_{options.group_by_key}",
-            )
+
+        self._output(
+            agg_df,
+            options,
+            plot_type="blame",
+            title=f"{self.name} Blame at {rev[:10] if rev else 'HEAD'}",
+            x=f"{data_field}:Q",
+            y=options.group_by_key,
+            filename=f"{self.name}_blame_by_{options.group_by_key}",
+        )
 
         return agg_df
 
     def cumulative_blame(
-        self, options: BlameCmdOptions, batch_size=2, data_field="lines"
+        self, options: BlameCmdOptions, batch_size=2, data_field="num_lines"
     ) -> DataFrame:
         """For each revision over time, the number of total lines authored or commmitted by
         an actor at that point in time.
         """
         total = DataFrame()
-        if options.aggregate_by == "author":
-            field = "authored_datetime"
-        else:
-            field = "committed_datetime"
-        sha_dates = (
+        shas = (
             self.filtered_revs(options, ignore_limit=True)
             .sort(cs.temporal())
-            .select(pl.col(("sha", field)))
-            .unique("sha", keep="first", maintain_order=True)
+            .select(pl.col("sha"))
+            .unique()
             .iter_rows()
         )
         total = DataFrame()
@@ -431,16 +432,16 @@ class RepoAnalyzer:
         # Manually set up the pool rather than use a context manager, because
         # killing the subprocesses breaks coverage
         with Pool(processes=max_cpu_count, initargs={"daemon": True}) as p:
-            fn = functools.partial(self._blame_with_dt, options=options, headless=True)
-            blame_frame_results = p.starmap(fn, sha_dates, chunksize=batch_size)
+            fn = functools.partial(self.blame, options, headless=True)
+            blame_frame_results = p.starmap(fn, shas, chunksize=batch_size)
 
         for blame_dfs in blame_frame_results:
             _ = total.vstack(blame_dfs, in_place=True)
 
         pivot_df = (
             total.pivot(
-                options.group_by_key,
-                index="datetime",
+                on=[options.dt_field],
+                index=options.group_by_key,
                 values=data_field,
                 aggregate_function="sum",
             )

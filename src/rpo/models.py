@@ -75,6 +75,14 @@ class DataSelectionOptions(BaseModel):
     )
 
     @property
+    def dt_field(self):
+        if self.aggregate_by == "author":
+            dt_field = "authored_datetime"
+        else:
+            dt_field = "committed_datetime"
+        return dt_field
+
+    @property
     def group_by_key(self):
         return f"{self.aggregate_by}_{self.identify_by}"
 

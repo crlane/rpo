@@ -25,6 +25,7 @@ dependencies = [
     "polars[pyarrow]>=1.30.0",
     "pydanclick>=0.5.1",
     "pydantic>=2.11.5",
+    "python-dateutil>=2.9.0.post0",
 ]
 
 [dependency-groups]
