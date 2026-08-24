@@ -43,3 +43,16 @@ Options plumbing convention: analyzer methods accept a specific `*CmdOptions` mo
 - `tests/conftest.py` builds a synthetic `tmp_repo` (3 authors, file add/remove/truncate, one author email change mid-stream) and a `tmp_repo_analyzer` fixture (`in_memory=True`). Use these for unit tests rather than mocking `git.Repo`.
 - `tests/integration/test_cpython_repository.py` clones cpython. Set `LARGE_REPO_PATH` to an existing local clone to avoid the download.
 - Markers: `slow` and `integration` are registered in `pyproject.toml`; `conftest.py` auto-adds the `integration` marker to anything under `tests/integration/`.
+
+## Known blockers
+
+- **`Cargo.toml` uses a path dep on `../rpo-rust/rpo`, not the published
+  crate.** Every version of `bisync` was yanked upstream on 2026-08-24;
+  `gix` pulls it in transitively via `gix-protocol`, so a fresh resolve
+  of `rpo = "0.1.0-beta.2"` fails. Upstream issue:
+  https://github.com/GitoxideLabs/gitoxide/issues/2939
+
+  Consequence: this repo currently only builds on a machine that also
+  has `rpo-rust` checked out as a sibling directory. Revert to the
+  crates.io version before building any wheel for release. Tracked in
+  `rpo-rust/BACKLOG.md`.

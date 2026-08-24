@@ -19,6 +19,9 @@ polars = { version = "0.55", features = ["lazy", "dtype-datetime", "dtype-catego
 # All versions of `bisync` were yanked upstream on 2026-08-24; it is a
 # non-optional dependency of gix-protocol, which gix pulls in
 # unconditionally, so a fresh resolve of the published crate fails.
-# gitoxide has an open issue. Switch back to the crates.io version once
-# that lands — the binding code is identical either way.
+# Upstream issue: https://github.com/GitoxideLabs/gitoxide/issues/2939
+# Switch back to the crates.io version once that lands — the binding
+# code is identical either way. This MUST be reverted before shipping a
+# wheel: as a path dep, the package only builds alongside a checkout of
+# rpo-rust.
 rpo = { path = "../rpo-rust/rpo" }
