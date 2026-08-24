@@ -1,6 +1,7 @@
 # RPO: Repository Participation Observer
 
 [![Python application](https://github.com/crlane/rpo/actions/workflows/uv-python-app.yml/badge.svg)](https://github.com/crlane/rpo/actions/workflows/uv-python-app.yml)
+
 A command line tool and Python library to help you analyze and visualized Git repositories. Ever wondered who has most contributions? How participation has changed over time? What are the hotspots in your code that change frequently? Who has the highest bus factor? `rpo` can help.
 
 > NOTE: This is alpha software under active development. There will be breaking changes.
@@ -135,6 +136,8 @@ The authors regularly [test](./tests/integration/test_cpython_repository.py) usi
 - [git-truck](https://github.com/git-truck)
 - [busfactor](https://github.com/SOM-Research/busfactor)
 - [bus-factor-explorer](https://github.com/JetBrains-Research/bus-factor-explorer)
+- [git-of-theseus](https://github.com/erikbern/git-of-theseus)
+- [hercules](https://github.com/src-d/hercules)
 
 ## References
 
@@ -178,4 +181,8 @@ git cat-file --batch-all-objects --batch-check --unordered
 
 ```bash
 git rev-list --all --objects --filter=object:type=blob HEAD | git cat-file --batch-check="%(objectname) %(objecttype) %(rest) %(deltabase)"
+```
+
+```bash
+git log --follow --pretty=format:%H -- FILE
 ```
