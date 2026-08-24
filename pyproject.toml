@@ -1,6 +1,6 @@
 [project]
 name = "rpo"
-dynamic = ["version"]
+version = "0.2.0a1"
 description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"
@@ -60,31 +60,14 @@ markers = [
 extend_exclude = ["scripts"]
 
 [build-system]
-requires = [
-    "hatchling",
-    "wheel",
-]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rpo"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-  "src/rpo",
-  "tests",
-]
-exclude = [
-  "*.json",
-  "img",
-  ".gitignore"
-]
-
-[tool.hatch.version]
-path = "src/rpo/__init__.py"
-
-
+[tool.maturin]
+python-source = "python"
+module-name = "rpo._rpo"
+features = ["pyo3/extension-module"]
 
 [tool.basedpyright]
 reportUnreachable = 'hint'
