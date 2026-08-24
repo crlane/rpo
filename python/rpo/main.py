@@ -91,10 +91,7 @@ def cli(
                 logger.info(f"Config file overidden option {k}: {old}->{new}")
         ctx.obj["config"] = config
 
-    ctx.obj["analyzer"] = RepoAnalyzer(
-        options=options,
-        in_memory=not options.persist_data,
-    )
+    ctx.obj["analyzer"] = RepoAnalyzer(options=options)
 
 
 @cli.command()
@@ -171,8 +168,7 @@ def blame(
     options = BlameCmdOptions(
         **file_output.model_dump(), **data_options.model_dump()
     )  #
-    data_key = "lines"
-    _ = ra.blame(options, rev=revision, data_field=data_key)
+    _ = ra.blame(options, rev=revision)
 
 
 #

@@ -36,17 +36,11 @@ def test_subcommand_help(runner, subcommand):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("identify_by", ["name", "email"])
-@pytest.mark.parametrize(
-    "persistence", ["--persist-data", "--no-persist-data"], ids=("persist", "inmemory")
-)
 @pytest.mark.parametrize("subcommand", ["blame", "cblame", "punchcard"])
-def test_plottable_subcommands(
-    subcommand, persistence, identify_by, runner, tmp_repo, actors
-):
+def test_plottable_subcommands(subcommand, identify_by, runner, tmp_repo, actors):
     args = [
         "-p",
         tmp_repo.working_dir,
-        persistence,
         subcommand,
         "-I",
         identify_by,

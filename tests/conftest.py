@@ -99,5 +99,5 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
 
 @pytest.fixture
 def tmp_repo_analyzer(tmp_repo: Repo) -> RepoAnalyzer:
-    ra = RepoAnalyzer(repo=tmp_repo, in_memory=True)
+    ra = RepoAnalyzer(repo=tmp_repo)
     return ra

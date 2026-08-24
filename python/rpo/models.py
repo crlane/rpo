@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 import polars as pl
 import polars.selectors as cs
-from git import Commit as GitCommit
 from pydantic import BaseModel, Field
 
 
@@ -172,10 +171,6 @@ class GitOptions(BaseModel):
         default=True,
         description="If true, exclude anything that's in the *current* .gitignore from analysis, even if it was previously in the repository",
     )
-    persist_data: bool = Field(
-        default=True,
-        description="If true, persist commit data locally to speed up future analyses",
-    )
 
 
 def recursive_getattr(
@@ -194,51 +189,3 @@ def recursive_getattr(
     except AttributeError:
         head, _, tail = field.partition(separator)
         return recursive_getattr(getattr(obj, head), tail)
-
-
-class FileChangeCommitRecord(BaseModel):
-    repository: str
-    sha: str
-    authored_datetime: datetime
-    author_name: str
-    author_email: str | None
-    committed_datetime: datetime
-    committer_name: str
-    committer_email: str | None
-
-    summary: str
-    gpgsig: str | None = None
-    # file change info
-    filename: str | None = None
-    insertions: float | None = None
-    deletions: float | None = None
-    lines: float | None = None
-    change_type: Literal["M", "A", "D"] | None = None
-    is_binary: bool | None = None
-
-    @classmethod
-    def from_git(cls, git_commit: GitCommit, for_repo: str, by_file: bool = False):
-        fields = {
-            "hexsha": "sha",
-            "authored_datetime": "authored_datetime",
-            "author.name": "author_name",
-            "author.email": "author_email",
-            "committed_datetime": "committed_datetime",
-            "committer.name": "committer_name",
-            "committer.email": "committer_email",
-            "summary": "summary",
-            "gpgsig": "gpgsig",
-        }
-        base = {v: recursive_getattr(git_commit, f) for f, v in fields.items()}
-        base["repository"] = for_repo
-        if by_file:
-            data = deepcopy(base)
-            for f, changes in git_commit.stats.files.items():
-                data["filename"] = f
-                # if all the line change statistics are 0, it's a binary file
-                lines_changed = sum(
-                    changes.get(t, 0) for t in ("insertions", "deletions", "lines")
-                )
-                data["is_binary"] = not lines_changed
-                data.update(**changes)
-                yield cls(**data)

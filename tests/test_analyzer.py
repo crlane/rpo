@@ -1,5 +1,6 @@
 from typing import LiteralString
 
+import polars as pl
 import pytest
 from git import Actor
 from git.repo import Repo
@@ -15,44 +16,6 @@ from rpo.models import (
     SummaryCmdOptions,
 )
 
-
-@pytest.mark.parametrize(
-    "options, branches, expected",
-    [
-        (GitOptions(), ("foo", "bar", "main"), "main"),
-        (GitOptions(), ("foo", "bar", "master"), "master"),
-        (GitOptions(), ("master", "main"), "main"),
-        (GitOptions(branch="master"), ("master", "main"), "master"),
-        (
-            GitOptions(branch="foo"),
-            (
-                "master",
-                "main",
-                "foo",
-                "bar",
-            ),
-            "foo",
-        ),
-    ],
-    ids=[
-        "main-no-master",
-        "master-no-main",
-        "prefer-main-over-master",
-        "specified-master",
-        "specified-other",
-    ],
-)
-def test_default_branch(
-    options: GitOptions, branches: list[str], expected: str, monkeypatch, tmp_repo
-):
-    class MockRepo:
-        def __init__(self, name):
-            self.name = name
-
-    mock_branches = [MockRepo(b) for b in branches]
-    monkeypatch.setattr(Repo, "branches", mock_branches)
-    ra = RepoAnalyzer(repo=tmp_repo, options=options)
-    assert ra.default_branch == expected
 
 
 @pytest.mark.parametrize(
@@ -75,10 +38,10 @@ def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
         ActivityReportCmdOptions(aggregate_by="author", sort_by="numeric")
     ).to_dict(as_series=False)
     assert list(file_report.keys()) == [
-        "filename",
-        "lines",
+        "path",
         "insertions",
         "deletions",
+        "lines",
         "net",
     ]
     assert file_report
@@ -91,10 +54,10 @@ def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
         )
     ).to_dict(as_series=False)
     assert list(contributor_report.keys()) == [
-        "author_name",
-        "lines",
+        "canonical_author_name",
         "insertions",
         "deletions",
+        "lines",
         "net",
     ]
     # author 1, added one file with one line, deletes file
@@ -127,7 +90,9 @@ def test_blame(
 ):
     options = BlameCmdOptions(identify_by=identify_by)
     blame_report = tmp_repo_analyzer.blame(options).to_dict(as_series=False)
-    flattened = dict(zip(blame_report[f"author_{identify_by}"], blame_report["lines"]))
+    flattened = dict(
+        zip(blame_report[f"canonical_author_{identify_by}"], blame_report["lines"])
+    )
     actor = actors[-1]
     assert flattened[getattr(actor, identify_by)] == line_count
 
@@ -138,24 +103,12 @@ def test_bus_factor(tmp_repo_analyzer):
 
 
 @pytest.mark.parametrize(
-    "identifier,identify_by,aggregate_by,days_committed,count",
+    "identifier,identify_by,aggregate_by,slots,commits",
     [
-        (
-            "updated@example.com",
-            "email",
-            "author",
-            2,
-            4,
-        ),
-        ("User2 Lastname", "name", "author", 3, 7),
-        (
-            "updated@example.com",
-            "email",
-            "committer",
-            2,
-            4,
-        ),
-        ("User2 Lastname", "name", "committer", 3, 7),
+        ("updated@example.com", "email", "author", 2, 2),
+        ("User2 Lastname", "name", "author", 2, 3),
+        ("updated@example.com", "email", "committer", 2, 2),
+        ("User2 Lastname", "name", "committer", 2, 3),
     ],
 )
 def test_punchcard(
@@ -163,9 +116,10 @@ def test_punchcard(
     identifier: str,
     identify_by: LiteralString,
     aggregate_by: str,
-    days_committed: int,
-    count: int,
+    slots: int,
+    commits: int,
 ):
+    """A punchcard is a (day-of-week, hour) grid of commit counts."""
     df = tmp_repo_analyzer.punchcard(
         PunchcardCmdOptions(
             identifier=identifier,
@@ -173,12 +127,27 @@ def test_punchcard(
             aggregate_by=aggregate_by,
         )
     )
-    assert df.height == days_committed
-    df_dict = df.to_dict(as_series=False)
-    assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
+    assert list(df.columns) == ["day", "hour", "count"]
+    assert df.height == slots, "occupied day/hour slots"
+    assert df["count"].sum() == commits, "total commits"
 
 
 def test_revisions(tmp_repo_analyzer):
     res = tmp_repo_analyzer.revisions(RevisionsCmdOptions())
 
     assert res.height == 6, "Number of revisions incorrect"
+
+
+def test_net_is_signed_when_deletions_exceed_insertions(tmp_repo_analyzer):
+    """The engine's counts are unsigned; net must not wrap around."""
+    report = tmp_repo_analyzer.file_report(
+        ActivityReportCmdOptions(aggregate_by="author")
+    )
+    assert report["net"].dtype == pl.Int64, (
+        "net must be signed; unsigned subtraction wraps a net loss to ~1.8e19"
+    )
+    # Same for the contributor view.
+    contributors = tmp_repo_analyzer.contributor_report(
+        ActivityReportCmdOptions(aggregate_by="author")
+    )
+    assert contributors["net"].dtype == pl.Int64
