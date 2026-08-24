@@ -1,0 +1,26 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Run fast tests and the CLI smoke test
+    deps: [test, test_cli]
+
+  integration:
+    desc: Run integration tests (may clone large repos)
+    cmds:
+      - uv run py.test -m integration
+
+  test_slow:
+    desc: Run all non-integration tests, including slow ones
+    cmds:
+      - uv run --env-file .env py.test -m 'not integration'
+
+  test:
+    desc: Run fast unit tests (excludes slow and integration)
+    cmds:
+      - uv run --env-file .env py.test -m 'not slow and not integration'
+
+  test_cli:
+    desc: Run the end-to-end CLI smoke test
+    cmds:
+      - bash ./test_cli.sh
