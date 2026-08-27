@@ -27,15 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: x86_64
-            sccache: "true"
-          # sccache wraps the cross-compiler in a way that loses
-          # __ARM_ARCH, which `ring` (pulled in by polars via
-          # object_store) needs to assemble its ARM sources. Building
-          # without it is slower but works.
-          - target: aarch64
-            sccache: "false"
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,8 +38,12 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
-          sccache: ${{ matrix.sccache }}
+          sccache: "true"
           manylinux: auto
+          # The manylinux cross-compiler does not define __ARM_ARCH when
+          # assembling, which `ring` requires. polars pulls ring in via
+          # object_store, unconditionally — there is no feature to drop it.
+          docker-options: -e CFLAGS_aarch64_unknown_linux_gnu=-D__ARM_ARCH=8
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-${{ matrix.target }}
