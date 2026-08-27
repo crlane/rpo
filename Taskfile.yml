@@ -12,8 +12,8 @@ tasks:
       - uv run maturin build --release
 
   default:
-    desc: Run fast tests and the CLI smoke test
-    deps: [test, test_cli]
+    desc: Run fast unit tests
+    deps: [test]
 
   integration:
     desc: Run integration tests (may clone large repos)
@@ -30,7 +30,7 @@ tasks:
     cmds:
       - uv run --env-file .env py.test -m 'not slow and not integration'
 
-  test_cli:
-    desc: Run the end-to-end CLI smoke test
+  examples:
+    desc: Run every example script against this repo
     cmds:
-      - bash ./test_cli.sh
+      - for f in examples/0*.py; do echo "== $f"; uv run python "$f" || exit 1; done

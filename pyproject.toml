@@ -1,6 +1,6 @@
 [project]
 name = "rpo"
-version = "0.2.0a1"
+version = "0.1.0b3"
 description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"
@@ -18,11 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "altair[all]>=5.5.0",
-    "click>=8.2.1",
-    "click-aliases>=1.0.5",
     "polars[pyarrow]>=1.30.0",
-    "pydanclick>=0.5.1",
-    "pydantic>=2.11.5",
 ]
 
 [dependency-groups]
@@ -43,9 +39,6 @@ Repsoitory = "https://github.com/crlane/rpo"
 "Bug Tracker" = "https://github.com/crlane/rpo/issues"
 Changelog = "https://github.com/crlane/rpo/blob/master/CHANGELOG.md"
 
-[project.scripts]
-rpo = 'rpo.main:cli'
-
 [tool.pytest.ini_options]
 addopts = "-v --cov=rpo --cov-report=term-missing --cov-branch"
 markers = [
@@ -54,7 +47,7 @@ markers = [
 ]
 
 [tool.deptry]
-extend_exclude = ["scripts"]
+extend_exclude = ["scripts", "examples"]
 # altair is used through polars' `.plot` accessor, never imported directly.
 # `rpo` here is this package importing its own compiled extension module.
 ignore = ["DEP002", "DEP003"]

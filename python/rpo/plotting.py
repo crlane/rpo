@@ -1,77 +1,97 @@
+"""Chart helpers for the report frames.
+
+Each function takes a report DataFrame and writes a PNG, returning the
+path. They are deliberately explicit — nothing plots as a side effect of
+running a report.
+
+Charts are rendered with Altair through `polars.DataFrame.plot`.
+"""
+
 import logging
-import time
 from pathlib import Path
 
+import altair as alt
+import polars as pl
 from polars import DataFrame
-
-from .models import PlotOptions
-from .types import SupportedPlotType
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PPI = 200
 
+DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-class Plotter:
-    def __init__(
-        self,
-        df: DataFrame,
-        options: PlotOptions,
-        plot_type: SupportedPlotType,
-        **kwargs,
-    ):
-        self.df = df
-        self.location: Path = Path(options.img_location)
-        _ = self.location.mkdir(exist_ok=True, parents=True)
-        self.plot_type = plot_type
-        self.plot_args = kwargs
 
-    def plot(self):
-        if self.plot_type == "cumulative_blame":
-            out = self._plot_cumulative_blame()
-        elif self.plot_type == "blame":
-            out = self._plot_blame()
-        elif self.plot_type == "punchcard":
-            out = self._plot_punchcard()
-        else:
-            raise ValueError("Unsupported plot type")
+def _save(chart, output: str | Path) -> Path:
+    out = Path(output)
+    if out.parent != Path():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    chart.save(out, ppi=DEFAULT_PPI)
+    logger.info("wrote %s", out)
+    return out
 
-        logger.info(f"File written to {out}")
 
-    def _plot_blame(self) -> Path:
-        chart = self.df.plot.bar(
-            x=self.plot_args.get("x", "lines:Q"),
-            y=self.plot_args.get("y", "author_name"),
-        ).properties(title=self.plot_args.get("title", "Blame"))
+def blame(
+    df: DataFrame,
+    output: str | Path = "blame.png",
+    *,
+    title: str = "Lines owned at HEAD",
+) -> Path:
+    """Horizontal bar chart of `RepoAnalyzer.blame_report()`."""
+    identity = df.columns[0]
+    chart = df.plot.bar(x="lines:Q", y=f"{identity}:N").properties(title=title)
+    return _save(chart, output)
 
-        filename = self.plot_args.get("filename", f"repo_blame_{time.time()}")
-        output = self.location / f"{filename}.png"
-        chart.save(output, ppi=DEFAULT_PPI)
-        return output
 
-    def _plot_cumulative_blame(
-        self,
-    ) -> Path:
-        # see https://altair-viz.github.io/user_guide/marks/area.html
-        chart = self.df.plot.area(
-            x=self.plot_args.get("x", "datetime:T"),
-            y=self.plot_args.get("y", "sum(lines):Q"),
-            color=self.plot_args.get(
-                "color",
-            ),  # f"{options.group_by_key}:N",
-        ).properties(
-            title=self.plot_args.get("title", "Cumulative Blame"),
-        )
-        filename = self.plot_args.get("filename", f"cumulative_blame_{time.time()}")
-        output = self.location / f"{filename}.png"
-        chart.save(output, ppi=DEFAULT_PPI)
-        return output
+def cumulative_blame(
+    df: DataFrame,
+    output: str | Path = "cumulative_blame.png",
+    *,
+    title: str = "Cumulative blame",
+) -> Path:
+    """Stacked area chart of `RepoAnalyzer.cumulative_blame()`.
 
-    def _plot_punchcard(self) -> Path:
-        # see https://altair-viz.github.io/user_guide/marks/area.html
-        title = self.plot_args.pop("title", "Author Punchcard")
-        filename = self.plot_args.pop("filename", f"punchcard_{time.time()}")
-        chart = self.df.plot.circle(**self.plot_args).properties(title=title)
-        output = self.location / f"{filename}.png"
-        chart.save(output, ppi=DEFAULT_PPI)
-        return output
+    That report is one column per contributor, which Altair cannot stack
+    directly, so it is unpivoted back to long form first.
+    """
+    long = df.unpivot(
+        index="snapshot_time", variable_name="contributor", value_name="lines"
+    )
+    chart = long.plot.area(
+        x="snapshot_time:T", y="lines:Q", color="contributor:N"
+    ).properties(title=title)
+    return _save(chart, output)
+
+
+def punchcard(
+    df: DataFrame,
+    output: str | Path = "punchcard.png",
+    *,
+    title: str = "Commit punchcard",
+) -> Path:
+    """Day/hour bubble chart of `RepoAnalyzer.punchcard()`."""
+    named = df.with_columns(
+        pl.col("day")
+        .replace_strict({i + 1: name for i, name in enumerate(DAY_NAMES)})
+        .alias("day_name")
+    )
+    chart = named.plot.circle(
+        x="hour:O",
+        y=alt.Y("day_name:N", sort=DAY_NAMES, title="day"),
+        size="count:Q",
+        color="count:Q",
+    ).properties(title=title)
+    return _save(chart, output)
+
+
+def file_churn(
+    df: DataFrame,
+    output: str | Path = "file_churn.png",
+    *,
+    top: int = 20,
+    title: str = "Most-changed files",
+) -> Path:
+    """Bar chart of the busiest files from `RepoAnalyzer.file_report()`."""
+    chart = (
+        df.head(top).plot.bar(x="lines:Q", y="path:N").properties(title=title)
+    )
+    return _save(chart, output)
