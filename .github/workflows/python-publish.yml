@@ -49,16 +49,10 @@ jobs:
           name: wheels-linux-${{ matrix.target }}
           path: dist
 
+  # Apple silicon only: the macos-13 (Intel) runner is retired and jobs
+  # targeting it queue forever. Intel Macs can install from the sdist.
   macos:
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-13      # intel
-            target: x86_64
-          - runner: macos-latest  # apple silicon
-            target: aarch64
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,12 +61,12 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
+          target: aarch64
           args: --release --out dist
           sccache: "true"
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.target }}
+          name: wheels-macos-aarch64
           path: dist
 
   windows:
