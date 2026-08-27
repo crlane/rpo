@@ -3,7 +3,6 @@
 import polars as pl
 import pytest
 from git import Actor
-
 from rpo.analyzer import RepoAnalyzer
 
 
@@ -88,9 +87,7 @@ class TestBlame:
         line_count: int,
     ):
         report = tmp_repo_analyzer.blame_report(identify_by=identify_by)
-        owned = dict(
-            zip(report[f"canonical_author_{identify_by}"], report["lines"])
-        )
+        owned = dict(zip(report[f"canonical_author_{identify_by}"], report["lines"]))
         assert owned[getattr(actors[-1], identify_by)] == line_count
 
     def test_cumulative_blame_is_one_row_per_snapshot(self, tmp_repo_analyzer):

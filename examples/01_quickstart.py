@@ -1,10 +1,9 @@
 """The raw frames: one walk, four DataFrames.
 
-    python examples/01_quickstart.py [repo-path]
+python examples/01_quickstart.py [repo-path]
 """
 
 import polars as pl
-
 import rpo
 from _common import repo_from_argv
 

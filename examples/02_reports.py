@@ -1,6 +1,6 @@
 """RepoAnalyzer: walk once, then run reports over the frames.
 
-    python examples/02_reports.py [repo-path]
+python examples/02_reports.py [repo-path]
 """
 
 import rpo

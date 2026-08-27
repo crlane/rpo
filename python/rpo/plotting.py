@@ -91,7 +91,5 @@ def file_churn(
     title: str = "Most-changed files",
 ) -> Path:
     """Bar chart of the busiest files from `RepoAnalyzer.file_report()`."""
-    chart = (
-        df.head(top).plot.bar(x="lines:Q", y="path:N").properties(title=title)
-    )
+    chart = df.head(top).plot.bar(x="lines:Q", y="path:N").properties(title=title)
     return _save(chart, output)

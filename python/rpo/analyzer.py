@@ -216,9 +216,7 @@ class RepoAnalyzer:
         cadence differs from the one the analyzer was built with.
         """
         group = group_column(aggregate_by, identify_by)
-        raw = _rpo.blame_over_time(
-            self.path, snapshots=snapshots, **self._walk_options
-        )
+        raw = _rpo.blame_over_time(self.path, snapshots=snapshots, **self._walk_options)
         return (
             raw.group_by(["snapshot_time", group])
             .agg(pl.sum("line_count").alias("lines"))
@@ -234,9 +232,7 @@ class RepoAnalyzer:
 
         Columns: `snapshot_time`, `path`, `lines`.
         """
-        raw = _rpo.blame_over_time(
-            self.path, snapshots=snapshots, **self._walk_options
-        )
+        raw = _rpo.blame_over_time(self.path, snapshots=snapshots, **self._walk_options)
         return (
             raw.group_by(["snapshot_time", "path"])
             .agg(pl.sum("line_count").alias("lines"))

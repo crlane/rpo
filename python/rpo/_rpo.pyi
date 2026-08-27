@@ -4,7 +4,7 @@ from typing import Literal
 
 import polars as pl
 
-Snapshots = Literal["head", "tags", "daily", "weekly", "monthly", "all"]
+type Snapshots = Literal["head", "tags", "daily", "weekly", "monthly", "all"]
 
 class RpoError(Exception):
     """Base class for every error raised by the Rust engine."""

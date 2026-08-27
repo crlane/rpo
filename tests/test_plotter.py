@@ -2,7 +2,6 @@
 
 import polars as pl
 import pytest
-
 from rpo import plotting
 
 
@@ -32,9 +31,7 @@ def test_punchcard_writes_a_png(tmp_path):
 def test_cumulative_blame_unpivots_wide_input(tmp_path):
     df = pl.DataFrame(
         {
-            "snapshot_time": pl.Series(
-                [1, 2], dtype=pl.Datetime(time_unit="ms")
-            ),
+            "snapshot_time": pl.Series([1, 2], dtype=pl.Datetime(time_unit="ms")),
             "A": [1, 2],
             "B": [3, 4],
         }

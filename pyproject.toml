@@ -24,6 +24,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "deptry>=0.23.0",
+    "maturin>=1.7,<2",
+    # Test fixtures build synthetic repositories with GitPython. It is not
+    # a runtime dependency — the engine does its own git access.
+    "gitpython>=3.1.44",
     "ipdb>=0.13.13",
     "packaging>=25.0",
     "pre-commit>=4.2.0",
@@ -45,6 +49,10 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as using real git repositories and/or network activity",
 ]
+
+[tool.ruff]
+# Code blocks in Markdown are hand-formatted for readability.
+extend-exclude = ["*.md"]
 
 [tool.deptry]
 extend_exclude = ["scripts", "examples"]

@@ -7,7 +7,6 @@ returns. When one does not fit, reach for the frames directly.
 """
 
 import polars as pl
-
 import rpo
 from _common import repo_from_argv
 
@@ -17,9 +16,7 @@ changes, commits = ra.file_changes, ra.commits
 
 print("== churn by file extension ==")
 print(
-    changes.with_columns(
-        pl.col("path").str.extract(r"\.([A-Za-z0-9]+)$").alias("ext")
-    )
+    changes.with_columns(pl.col("path").str.extract(r"\.([A-Za-z0-9]+)$").alias("ext"))
     .group_by("ext")
     .agg(
         pl.sum("insertions").alias("added"),

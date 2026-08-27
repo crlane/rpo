@@ -8,7 +8,6 @@ import subprocess
 
 import polars as pl
 import pytest
-
 import rpo
 
 
@@ -22,8 +21,13 @@ def _git(repo, *args, **env):
         "GIT_COMMITTER_DATE": "2024-01-01T00:00:00Z",
         **env,
     }
-    subprocess.run(["git", *args], cwd=repo, check=True,
-                   capture_output=True, env={"PATH": "/usr/bin:/bin", **environ})
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", **environ},
+    )
 
 
 @pytest.fixture
@@ -100,9 +104,11 @@ class TestGlobs:
         assert got == ["src/main.py"]
 
     def test_exclude_wins_over_include(self, repo):
-        got = paths(rpo.file_changes(
-            repo, include_globs=["src/**", "docs/**"], exclude_globs=["docs/**"]
-        ))
+        got = paths(
+            rpo.file_changes(
+                repo, include_globs=["src/**", "docs/**"], exclude_globs=["docs/**"]
+            )
+        )
         assert got == ["src/main.py"]
 
     def test_single_star_crosses_directory_separators(self, repo):

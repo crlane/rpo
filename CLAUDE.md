@@ -23,7 +23,12 @@ Dependencies are managed with `uv` (not pip). `Taskfile.yml` is the canonical ru
 
 Single test: `uv run py.test tests/test_analyzer.py::test_name -v`.
 
-CI (`.github/workflows/uv-python-app.yml`) runs `uv run py.test -m 'not integration'` plus `uv run ruff check -q` and `uv run ruff format -q`. Match this before pushing. Pre-commit runs `deptry` (with `--ignore DEP001`) and basic hygiene checks.
+CI has two workflows:
+
+- `uv-python-app.yml` — on push/PR. Builds the extension (`maturin develop --release`), then runs pytest + ruff on linux. A separate `import-check` job builds a wheel on macOS and Windows and asserts the extension loads and analyzes a repository; the full suite does not run there.
+- `python-publish.yml` — on published release. Builds wheels for linux (x86_64, aarch64), macOS (x86_64, aarch64), and windows x64, plus an sdist, then publishes to PyPI via trusted publishing. `workflow_dispatch` builds the matrix without publishing.
+
+The extension is built with `abi3-py313`, so one wheel per platform covers 3.13 and every later 3.x. Match `uv run py.test -m 'not integration'`, `uv run ruff check -q`, and `uv run ruff format --check -q` before pushing. Pre-commit runs `deptry` and basic hygiene checks.
 
 Coverage is always on (`addopts = -v --cov=rpo --cov-report=term-missing --cov-branch` in `pyproject.toml`).
 
