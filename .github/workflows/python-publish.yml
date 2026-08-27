@@ -27,7 +27,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - target: x86_64
+            sccache: "true"
+          # sccache wraps the cross-compiler in a way that loses
+          # __ARM_ARCH, which `ring` (pulled in by polars via
+          # object_store) needs to assemble its ARM sources. Building
+          # without it is slower but works.
+          - target: aarch64
+            sccache: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,7 +46,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
-          sccache: "true"
+          sccache: ${{ matrix.sccache }}
           manylinux: auto
       - uses: actions/upload-artifact@v4
         with:
