@@ -15,6 +15,8 @@ Two levels of API:
 >>> ra.contributor_report(identify_by="email")
 """
 
+import importlib
+
 from rpo._rpo import (
     Analysis,
     InvalidGlobError,
@@ -28,11 +30,25 @@ from rpo._rpo import (
     file_changes,
 )
 
-from . import plotting
 from .analyzer import RepoAnalyzer
 from .models import AggregateBy, IdentifyBy, Snapshots, group_column
 
 __version__ = "0.1.0b3"
+
+
+def __getattr__(name: str):
+    """Import `rpo.plotting` on first use.
+
+    Charting pulls in Altair, which is a heavier dependency than the
+    analysis itself needs. Deferring it keeps `import rpo` working in
+    environments that only want the frames.
+    """
+    if name == "plotting":
+        # importlib, not `from . import plotting`: the latter re-enters
+        # this function and recurses forever.
+        return importlib.import_module(".plotting", __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AggregateBy",

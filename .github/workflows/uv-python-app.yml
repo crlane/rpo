@@ -41,10 +41,10 @@ jobs:
         run: uv run py.test -m 'not integration'
 
       - name: Lint with Ruff
-        run: uv run ruff check -q
+        run: uv tool run ruff check -q
 
       - name: Check format with Ruff
-        run: uv run ruff format --check -q
+        run: uv tool run ruff format --check -q
 
   # The extension must load on every platform we publish wheels for.
   # Running the whole suite everywhere is not worth the minutes; a real
@@ -69,15 +69,20 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
+      # `uv tool run` keeps maturin out of the project environment. Syncing
+      # the project here would pull altair[all] -> vegafusion -> arro3-core,
+      # which ships no sdist and has no wheel for some runner/python
+      # combinations. This job only needs to prove the extension loads.
       - name: Build a wheel
-        run: uv run --with 'maturin>=1.7,<2' maturin build --release --out dist
+        run: uv tool run --from 'maturin>=1.7,<2' maturin build --release --out dist
 
       - name: Install the wheel and analyze this repository
         shell: bash
         run: |
           uv venv --python 3.13 .venv-wheel
-          uv pip install --python .venv-wheel --find-links dist rpo
-          uv run --python .venv-wheel python -c "
+          uv pip install --python .venv-wheel --find-links dist --no-deps rpo
+          uv pip install --python .venv-wheel polars
+          uv run --no-project --python .venv-wheel python -c "
           import rpo
           analysis = rpo.analyze('.')
           assert analysis.commits.height > 0, 'no commits found'
