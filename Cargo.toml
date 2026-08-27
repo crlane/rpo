@@ -15,13 +15,4 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module"] }
 pyo3-polars = "0.28"
 polars = { version = "0.55", features = ["lazy", "dtype-datetime", "dtype-categorical"] }
-# TEMPORARY: path dep instead of `rpo = "0.1.0-beta.2"`.
-# All versions of `bisync` were yanked upstream on 2026-08-24; it is a
-# non-optional dependency of gix-protocol, which gix pulls in
-# unconditionally, so a fresh resolve of the published crate fails.
-# Upstream issue: https://github.com/GitoxideLabs/gitoxide/issues/2939
-# Switch back to the crates.io version once that lands — the binding
-# code is identical either way. This MUST be reverted before shipping a
-# wheel: as a path dep, the package only builds alongside a checkout of
-# rpo-rust.
-rpo = { path = "../rpo-rust/rpo" }
+rpo = "0.1.0-beta.3"
