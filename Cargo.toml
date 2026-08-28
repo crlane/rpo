@@ -1,0 +1,31 @@
+[package]
+name = "rpo-bindings"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Python bindings for the rpo git-analysis library"
+license = "MIT"
+repository = "https://github.com/crlane/rpo"
+homepage = "https://github.com/crlane/rpo"
+publish = false
+# Keeps development-only files out of the sdist, whose file list comes
+# from `cargo package`.
+exclude = [
+    ".claude/",
+    ".github/",
+    "CLAUDE.md",
+    "Taskfile.yml",
+    ".coveragerc",
+    ".pre-commit-config.yaml",
+    "img/",
+]
+
+[lib]
+name = "_rpo"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313"] }
+pyo3-polars = "0.28"
+polars = { version = "0.55", features = ["lazy", "dtype-datetime", "dtype-categorical"] }
+rpo = "0.1.0-beta.3"

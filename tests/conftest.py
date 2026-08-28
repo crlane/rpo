@@ -1,13 +1,12 @@
 import os
 import time
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Generator
 
 import pytest
 from git.objects.util import Actor
 from git.repo import Repo
-
 from rpo.analyzer import RepoAnalyzer
 
 
@@ -57,10 +56,10 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
         _ = r.index.add(f)
         _ = r.index.commit(
             f"test commit with {line_count} lines",
-            author=actors[i],
+            author=a,
             author_date=author_date,
             commit_date=commit_date,
-            committer=actors[i],
+            committer=a,
         )
 
     remove_file_date = datetime.now(UTC) + timedelta(days=4)
@@ -99,5 +98,5 @@ def tmp_repo(repos_directory: Path, actors: list[Actor]) -> Repo:
 
 @pytest.fixture
 def tmp_repo_analyzer(tmp_repo: Repo) -> RepoAnalyzer:
-    ra = RepoAnalyzer(repo=tmp_repo, in_memory=True)
+    ra = RepoAnalyzer(tmp_repo.working_dir)
     return ra

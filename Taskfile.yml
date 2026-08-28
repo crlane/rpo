@@ -1,0 +1,36 @@
+version: '3'
+
+tasks:
+  develop:
+    desc: Build the Rust extension and install it into the venv (editable)
+    cmds:
+      - uv run maturin develop --release
+
+  build:
+    desc: Build a release wheel
+    cmds:
+      - uv run maturin build --release
+
+  default:
+    desc: Run fast unit tests
+    deps: [test]
+
+  integration:
+    desc: Run integration tests (may clone large repos)
+    cmds:
+      - uv run py.test -m integration
+
+  test_slow:
+    desc: Run all non-integration tests, including slow ones
+    cmds:
+      - uv run --env-file .env py.test -m 'not integration'
+
+  test:
+    desc: Run fast unit tests (excludes slow and integration)
+    cmds:
+      - uv run --env-file .env py.test -m 'not slow and not integration'
+
+  examples:
+    desc: Run every example script against this repo
+    cmds:
+      - for f in examples/0*.py; do echo "== $f"; uv run python "$f" || exit 1; done

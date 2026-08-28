@@ -1,6 +1,6 @@
 [project]
 name = "rpo"
-dynamic = ["version"]
+version = "0.1.0b3"
 description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"
@@ -18,18 +18,15 @@ classifiers = [
 ]
 dependencies = [
     "altair[all]>=5.5.0",
-    "click>=8.2.1",
-    "click-aliases>=1.0.5",
-    "duckdb>=1.3.1",
-    "gitpython>=3.1.44",
     "polars[pyarrow]>=1.30.0",
-    "pydanclick>=0.5.1",
-    "pydantic>=2.11.5",
 ]
 
 [dependency-groups]
 dev = [
     "deptry>=0.23.0",
+    "maturin>=1.7,<2",
+    # Test fixtures build synthetic repositories with GitPython. It is not
+    # a runtime dependency — the engine does its own git access.
     "gitpython>=3.1.44",
     "ipdb>=0.13.13",
     "packaging>=25.0",
@@ -46,9 +43,6 @@ Repsoitory = "https://github.com/crlane/rpo"
 "Bug Tracker" = "https://github.com/crlane/rpo/issues"
 Changelog = "https://github.com/crlane/rpo/blob/master/CHANGELOG.md"
 
-[project.scripts]
-rpo = 'rpo.main:cli'
-
 [tool.pytest.ini_options]
 addopts = "-v --cov=rpo --cov-report=term-missing --cov-branch"
 markers = [
@@ -56,35 +50,25 @@ markers = [
     "integration: marks tests as using real git repositories and/or network activity",
 ]
 
+[tool.ruff]
+# Code blocks in Markdown are hand-formatted for readability.
+extend-exclude = ["*.md"]
+
 [tool.deptry]
-extend_exclude = ["scripts"]
+extend_exclude = ["scripts", "examples"]
+# altair is used through polars' `.plot` accessor, never imported directly.
+# `rpo` here is this package importing its own compiled extension module.
+ignore = ["DEP002", "DEP003"]
 
 [build-system]
-requires = [
-    "hatchling",
-    "wheel",
-]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rpo"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-  "src/rpo",
-  "tests",
-]
-exclude = [
-  "*.json",
-  "img",
-  ".gitignore"
-]
-
-[tool.hatch.version]
-path = "src/rpo/__init__.py"
-
-
+[tool.maturin]
+python-source = "python"
+module-name = "rpo._rpo"
+features = ["pyo3/extension-module"]
 
 [tool.basedpyright]
 reportUnreachable = 'hint'

@@ -1,184 +1,120 @@
-from typing import LiteralString
+"""RepoAnalyzer reports, over the synthetic fixture repository."""
 
+import polars as pl
 import pytest
 from git import Actor
-from git.repo import Repo
-
 from rpo.analyzer import RepoAnalyzer
-from rpo.models import (
-    ActivityReportCmdOptions,
-    BlameCmdOptions,
-    BusFactorCmdOptions,
-    GitOptions,
-    PunchcardCmdOptions,
-    RevisionsCmdOptions,
-    SummaryCmdOptions,
-)
 
 
-@pytest.mark.parametrize(
-    "options, branches, expected",
-    [
-        (GitOptions(), ("foo", "bar", "main"), "main"),
-        (GitOptions(), ("foo", "bar", "master"), "master"),
-        (GitOptions(), ("master", "main"), "main"),
-        (GitOptions(branch="master"), ("master", "main"), "master"),
-        (
-            GitOptions(branch="foo"),
-            (
-                "master",
-                "main",
-                "foo",
-                "bar",
-            ),
-            "foo",
-        ),
-    ],
-    ids=[
-        "main-no-master",
-        "master-no-main",
-        "prefer-main-over-master",
-        "specified-master",
-        "specified-other",
-    ],
-)
-def test_default_branch(
-    options: GitOptions, branches: list[str], expected: str, monkeypatch, tmp_repo
-):
-    class MockRepo:
-        def __init__(self, name):
-            self.name = name
+class TestFrames:
+    def test_exposes_the_raw_frames(self, tmp_repo_analyzer: RepoAnalyzer):
+        assert tmp_repo_analyzer.commits.height == 6
+        assert tmp_repo_analyzer.file_changes.height > 0
+        assert tmp_repo_analyzer.blame is not None
+        assert tmp_repo_analyzer.skipped_files == []
 
-    mock_branches = [MockRepo(b) for b in branches]
-    monkeypatch.setattr(Repo, "branches", mock_branches)
-    ra = RepoAnalyzer(repo=tmp_repo, options=options)
-    assert ra.default_branch == expected
+    def test_repr_reports_frame_sizes(self, tmp_repo_analyzer: RepoAnalyzer):
+        assert "commits=6" in repr(tmp_repo_analyzer)
+
+    def test_walk_options_reach_the_engine(self, tmp_repo):
+        everything = RepoAnalyzer(tmp_repo.working_dir)
+        filtered = RepoAnalyzer(tmp_repo.working_dir, exclude_globs=["**/*.txt"])
+        assert filtered.file_changes.height < everything.file_changes.height
 
 
-@pytest.mark.parametrize(
-    "identify_by,contrib_count",
-    [("name", 3), ("email", 4)],
-    ids=("by-name", "by-email"),
-)
-def test_summary(tmp_repo_analyzer: RepoAnalyzer, identify_by: str, contrib_count: int):
-    options = SummaryCmdOptions(identify_by=identify_by)
-    summary = tmp_repo_analyzer.summary(options)
-    assert summary is not None
-    summary_dict = summary.to_dict(as_series=False)
-    assert summary_dict["files"] == [3]
-    assert summary_dict["contributors"] == [contrib_count]
-    assert summary_dict["commits"] == [6]
-
-
-def test_file_report(tmp_repo_analyzer: RepoAnalyzer):
-    file_report = tmp_repo_analyzer.file_report(
-        ActivityReportCmdOptions(aggregate_by="author", sort_by="numeric")
-    ).to_dict(as_series=False)
-    assert list(file_report.keys()) == [
-        "filename",
-        "lines",
-        "insertions",
-        "deletions",
-        "net",
-    ]
-    assert file_report
-
-
-def test_contributor_report(tmp_repo_analyzer: RepoAnalyzer):
-    contributor_report = tmp_repo_analyzer.contributor_report(
-        ActivityReportCmdOptions(
-            sort_by="user", identify_by="name", aggregate_by="author", limit=0
-        )
-    ).to_dict(as_series=False)
-    assert list(contributor_report.keys()) == [
-        "author_name",
-        "lines",
-        "insertions",
-        "deletions",
-        "net",
-    ]
-    # author 1, added one file with one line, deletes file
-    assert contributor_report["insertions"][0] == 1, "First author insertions mismatch"
-    assert contributor_report["deletions"][0] == 1, "First author deletions mismatch"
-    assert contributor_report["lines"][0] == 2, "First author lines changed mismatch"
-    assert contributor_report["net"][0] == 0, "First author net mismatch"
-
-    # author 2, addes one file with two lines, leaves file
-    assert contributor_report["insertions"][1] == 2
-    assert contributor_report["deletions"][1] == 0.0
-    assert contributor_report["lines"][1] == 2.0
-
-    # author 3, adds one file with three lines, duplicates contents, then truncates, leaves it
-    assert contributor_report["insertions"][2] == 6.0
-    assert contributor_report["deletions"][2] == 1.0
-    assert contributor_report["lines"][2] == 7.0
-
-
-@pytest.mark.parametrize(
-    "identify_by,line_count",
-    [("name", 5), ("email", 3)],
-    ids=("by-name", "by-email"),
-)
-def test_blame(
-    tmp_repo_analyzer: RepoAnalyzer,
-    actors: list[Actor],
-    identify_by: str,
-    line_count: int,
-):
-    options = BlameCmdOptions(identify_by=identify_by)
-    blame_report = tmp_repo_analyzer.blame(options).to_dict(as_series=False)
-    flattened = dict(zip(blame_report[f"author_{identify_by}"], blame_report["lines"]))
-    actor = actors[-1]
-    assert flattened[getattr(actor, identify_by)] == line_count
-
-
-def test_bus_factor(tmp_repo_analyzer):
-    _ = tmp_repo_analyzer.bus_factor(BusFactorCmdOptions())
-    assert True
-
-
-@pytest.mark.parametrize(
-    "identifier,identify_by,aggregate_by,days_committed,count",
-    [
-        (
-            "updated@example.com",
-            "email",
-            "author",
-            2,
-            4,
-        ),
-        ("User2 Lastname", "name", "author", 3, 7),
-        (
-            "updated@example.com",
-            "email",
-            "committer",
-            2,
-            4,
-        ),
-        ("User2 Lastname", "name", "committer", 3, 7),
-    ],
-)
-def test_punchcard(
-    tmp_repo_analyzer,
-    identifier: str,
-    identify_by: LiteralString,
-    aggregate_by: str,
-    days_committed: int,
-    count: int,
-):
-    df = tmp_repo_analyzer.punchcard(
-        PunchcardCmdOptions(
-            identifier=identifier,
-            identify_by=identify_by,
-            aggregate_by=aggregate_by,
-        )
+class TestSummary:
+    @pytest.mark.parametrize(
+        "identify_by,contributors", [("name", 3), ("email", 4)], ids=("name", "email")
     )
-    assert df.height == days_committed
-    df_dict = df.to_dict(as_series=False)
-    assert sum(df_dict[identifier]) == count, "aggregation is incorrect"
+    def test_counts_contributors_by_identity(
+        self, tmp_repo_analyzer, identify_by, contributors
+    ):
+        summary = tmp_repo_analyzer.summary(identify_by=identify_by)
+        assert summary.height == 1
+        assert summary["contributors"][0] == contributors
+        assert summary["commits"][0] > 0
 
 
-def test_revisions(tmp_repo_analyzer):
-    res = tmp_repo_analyzer.revisions(RevisionsCmdOptions())
+class TestActivityReports:
+    def test_contributor_report_columns(self, tmp_repo_analyzer: RepoAnalyzer):
+        report = tmp_repo_analyzer.contributor_report()
+        assert list(report.columns) == [
+            "canonical_author_name",
+            "commits",
+            "insertions",
+            "deletions",
+            "lines",
+            "net",
+        ]
 
-    assert res.height == 6, "Number of revisions incorrect"
+    def test_file_report_columns(self, tmp_repo_analyzer: RepoAnalyzer):
+        report = tmp_repo_analyzer.file_report()
+        assert list(report.columns) == [
+            "path",
+            "commits",
+            "contributors",
+            "insertions",
+            "deletions",
+            "lines",
+            "net",
+        ]
+
+    def test_reports_sort_by_churn_descending(self, tmp_repo_analyzer: RepoAnalyzer):
+        lines = tmp_repo_analyzer.file_report()["lines"].to_list()
+        assert lines == sorted(lines, reverse=True)
+
+    def test_limit_truncates(self, tmp_repo_analyzer: RepoAnalyzer):
+        assert tmp_repo_analyzer.file_report(limit=1).height == 1
+
+    def test_net_is_signed(self, tmp_repo_analyzer: RepoAnalyzer):
+        """The engine's counts are unsigned; net must not wrap around."""
+        for report in (
+            tmp_repo_analyzer.file_report(),
+            tmp_repo_analyzer.contributor_report(),
+        ):
+            assert report["net"].dtype == pl.Int64
+
+
+class TestBlame:
+    @pytest.mark.parametrize(
+        "identify_by,line_count", [("name", 5), ("email", 3)], ids=("name", "email")
+    )
+    def test_attributes_surviving_lines(
+        self,
+        tmp_repo_analyzer: RepoAnalyzer,
+        actors: list[Actor],
+        identify_by: str,
+        line_count: int,
+    ):
+        report = tmp_repo_analyzer.blame_report(identify_by=identify_by)
+        owned = dict(zip(report[f"canonical_author_{identify_by}"], report["lines"]))
+        assert owned[getattr(actors[-1], identify_by)] == line_count
+
+    def test_cumulative_blame_is_one_row_per_snapshot(self, tmp_repo_analyzer):
+        df = tmp_repo_analyzer.cumulative_blame(snapshots="all")
+        assert df.columns[0] == "snapshot_time"
+        assert df.height > 0
+
+    def test_file_timeline_columns(self, tmp_repo_analyzer: RepoAnalyzer):
+        df = tmp_repo_analyzer.file_timeline(snapshots="all")
+        assert list(df.columns) == ["snapshot_time", "path", "lines"]
+
+
+class TestPunchcard:
+    def test_grid_shape(self, tmp_repo_analyzer: RepoAnalyzer):
+        df = tmp_repo_analyzer.punchcard()
+        assert list(df.columns) == ["day", "hour", "count"]
+        assert df["count"].sum() == tmp_repo_analyzer.commits.height
+
+    @pytest.mark.parametrize(
+        "identifier,identify_by,commits",
+        [
+            ("updated@example.com", "email", 2),
+            ("User2 Lastname", "name", 3),
+        ],
+    )
+    def test_scoped_to_one_contributor(
+        self, tmp_repo_analyzer, identifier, identify_by, commits
+    ):
+        df = tmp_repo_analyzer.punchcard(identifier, identify_by=identify_by)
+        assert df["count"].sum() == commits

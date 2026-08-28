@@ -1,79 +1,128 @@
-# This workflow will upload a Python Package to PyPI when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+# Builds a wheel per platform and publishes to PyPI when a GitHub release
+# is published.
+#
+# The package is a compiled Rust extension, so `uv build` is not enough —
+# each platform needs its own wheel. The extension is built against the
+# stable ABI (abi3-py313), so one wheel per platform covers 3.13 and every
+# later 3.x rather than one wheel per minor version.
+#
+# Derived from `maturin generate-ci github`, trimmed to the targets worth
+# building: the generator also emits x86, armv7, s390x, and ppc64le, which
+# are QEMU-emulated and slow for platforms nobody runs this on.
 
 name: Upload Python Package
 
 on:
   release:
     types: [published]
+  # Lets you exercise the matrix without cutting a release.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  release-build:
+  linux:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version:
-          - "3.13"
-    env:
-      UV_PYTHON: ${{ matrix.python-version }}
-
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Install the project
-        run: uv sync --locked --all-extras
-
-      - name: Build release distributions
-        run: |
-          # NOTE: put your own distribution build steps here.
-          uv build
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
+          python-version: "3.13"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
         with:
-          name: release-dists
-          path: dist/
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          sccache: "true"
+          manylinux: auto
+          # The manylinux cross-compiler does not define __ARM_ARCH when
+          # assembling, which `ring` requires. polars pulls ring in via
+          # object_store, unconditionally — there is no feature to drop it.
+          docker-options: -e CFLAGS_aarch64_unknown_linux_gnu=-D__ARM_ARCH=8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: dist
+
+  # Apple silicon only: the macos-13 (Intel) runner is retired and jobs
+  # targeting it queue forever. Intel Macs can install from the sdist.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: aarch64
+          args: --release --out dist
+          sccache: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-aarch64
+          path: dist
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: x64
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x64
+          args: --release --out dist
+          sccache: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-x64
+          path: dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
 
   pypi-publish:
+    name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs:
-      - release-build
+    # Only publish for an actual release; workflow_dispatch just builds.
+    if: github.event_name == 'release'
+    needs: [linux, macos, windows, sdist]
     permissions:
-      # IMPORTANT: this permission is mandatory for trusted publishing
-      id-token: write
-
-    # Dedicated environments with protections for publishing are strongly recommended.
-    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
+      id-token: write   # mandatory for trusted publishing
     environment:
       name: release
-      # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
-      # url: https://pypi.org/p/YOURPROJECT
-      #
-      # ALTERNATIVE: if your GitHub Release name is the PyPI project version string
-      # ALTERNATIVE: exactly, uncomment the following line instead:
-      # url: https://pypi.org/project/YOURPROJECT/${{ github.event.release.name }}
+      url: https://pypi.org/project/rpo/
 
     steps:
-      - name: Retrieve release distributions
+      - name: Retrieve all wheels
         uses: actions/download-artifact@v4
         with:
-          name: release-dists
+          pattern: wheels-*
+          merge-multiple: true
           path: dist/
 
-      - name: Publish release distributions to PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
