@@ -22,6 +22,38 @@ permissions:
   contents: read
 
 jobs:
+  # A release publishes whatever the tag points at, so a tag that does not
+  # match the source would upload the wrong version under the right name —
+  # and PyPI versions cannot be replaced. Fail before anything is built.
+  check-version:
+    name: Tag matches version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the release tag against the source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          project=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          package=$(grep -m1 '^__version__ = ' python/rpo/__init__.py | cut -d'"' -f2)
+
+          echo "tag:                  $tag"
+          echo "pyproject.toml:       $project"
+          echo "rpo.__version__:      $package"
+
+          fail=0
+          if [ "$tag" != "$project" ]; then
+            echo "::error::release tag '$tag' does not match pyproject.toml version '$project'"
+            fail=1
+          fi
+          if [ "$package" != "$project" ]; then
+            echo "::error::rpo.__version__ '$package' does not match pyproject.toml version '$project'"
+            fail=1
+          fi
+          exit $fail
+
   linux:
     runs-on: ubuntu-latest
     strategy:
@@ -107,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only publish for an actual release; workflow_dispatch just builds.
     if: github.event_name == 'release'
-    needs: [linux, macos, windows, sdist]
+    needs: [check-version, linux, macos, windows, sdist]
     permissions:
       id-token: write   # mandatory for trusted publishing
     environment:
