@@ -1,6 +1,6 @@
 [project]
 name = "rpo"
-version = "0.1.0b3"
+version = "0.1.0b5"
 description = "Repository Participation Observer. A tool for investigation git repository contribution data and patterns."
 keywords = ["git", "repository", "statistics"]
 readme = "README.md"

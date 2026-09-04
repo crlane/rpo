@@ -840,7 +840,7 @@ wheels = [
 
 [[package]]
 name = "rpo"
-version = "0.1.0b3"
+version = "0.1.0b5"
 source = { editable = "." }
 dependencies = [
     { name = "altair", extra = ["all"] },

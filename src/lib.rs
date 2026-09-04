@@ -9,7 +9,7 @@ use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
-use rpo::{ActivityOptions, RepoAnalyzer, RpoError, SnapshotSelector};
+use rpo::{Activity, RepoAnalyzer, RpoError, SnapshotSelector};
 
 create_exception!(_rpo, RpoBaseError, PyException, "Base for all rpo errors.");
 create_exception!(_rpo, NotARepositoryError, RpoBaseError, "Path is not a git repository.");
@@ -92,7 +92,7 @@ fn configured(
     first_parent_only: bool,
     ignore_bots: bool,
 ) -> PyResult<rpo::Builder<rpo::DefaultBackend>> {
-    let activity = ActivityOptions {
+    let activity = Activity {
         ignore_merges,
         first_parent_only,
         ignore_whitespace: false,

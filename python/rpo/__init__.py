@@ -33,7 +33,7 @@ from rpo._rpo import (
 from .analyzer import RepoAnalyzer
 from .models import AggregateBy, IdentifyBy, Snapshots, group_column
 
-__version__ = "0.1.0b3"
+__version__ = "0.1.0b5"
 
 
 def __getattr__(name: str):

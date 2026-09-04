@@ -28,4 +28,4 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313"] }
 pyo3-polars = "0.28"
 polars = { version = "0.55", features = ["lazy", "dtype-datetime", "dtype-categorical"] }
-rpo = "0.1.0-beta.3"
+rpo = "0.1.0-beta.5"
